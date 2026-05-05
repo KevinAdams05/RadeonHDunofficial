@@ -1,7 +1,7 @@
 >[!NOTE]
 >An LLM was used to aid in development of this code.
 
-> **Bug reports (please attach listdev output, syslog and/or screenshots) and PRs welcome!**
+**Bug reports (please attach listdev output, syslog and/or screenshots) and PRs welcome! See "Logging Bugs / How to Help" section below**
 
 # RadeonHD (Unofficial) - Haiku Driver
 
@@ -13,18 +13,6 @@ This is an enhanced fork of the Haiku `radeon_hd` graphics driver with bug fixes
 > `radeon_hd` driver, distributed as a standalone `.hpkg` for users who want the fixes. 
 >
 > There is no active plan to upstream these changes.
-
-Repository: [https://github.com/KevinAdams05/RadeonHDunofficial](https://github.com/KevinAdams05/RadeonHDunofficial)
-
----
-
-## What This Fork Fixes
-
-The stock Haiku `radeon_hd` driver has several long-standing bugs that affect a
-wide range of AMD/ATI GPUs from the Evergreen (HD 5xxx) era through Polaris
-(RX 4xx/5xx) and APUs (Trinity, Kaveri, Kabini, Mullins, Carrizo, Stoney,
-Raven). This fork ships fixes for the most disruptive of those.
-
 
 ---
 
@@ -55,7 +43,7 @@ This driver was physically tested on the following cards and outputs:
 
 ## Logging Bugs / How to Help
 
-Bugs are welcome! To log a bug, please log it in github and include as much detail as possible.
+Bugs are welcome! To log a bug, [please log it here in github as an issue](https://github.com/KevinAdams05/RadeonHDunofficial/issues), and include as much detail as possible.
 
 From Haiku, attach your syslog file and output of listdev (that will show us the PCI ID which identifes the exact card). Please list what output connector and cable type you used. If you get weird artifacts or hit KDL then please include a picture of the screen.
 
