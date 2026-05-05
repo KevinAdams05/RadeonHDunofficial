@@ -1,0 +1,16 @@
+# Build artifacts
+*.hpkg
+*.hpkr
+build/
+dist/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

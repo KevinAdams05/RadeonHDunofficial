@@ -1,0 +1,1146 @@
+>[!NOTE]
+>An LLM was used to aid in development of this code.
+
+
+# RadeonHD (Unofficial) — Technical Documentation
+
+This document is the consolidated technical reference for the RadeonHD
+(unofficial) fork. It merges the original `radeon-hd-fix-notes.md` (Phase 1 —
+Cedar/Evergreen HDMI corruption) and `radeon-hd-phase2-fixes.md` (Phase 2 — APU,
+PLL, DPMS, DisplayPort) into a single, deeper write-up, plus the Phase 1.5
+HDMI encoder-mode regression hardening.
+
+> Repository: [https://github.com/KevinAdams05/RadeonHDunofficial](https://github.com/KevinAdams05/RadeonHDunofficial)
+> Author: Kevin Adams (with Claude Opus 4.6 / 4.7)
+> Branch carrying the fixes against Haiku master: `KevinMain`
+
+---
+
+## Table of Contents
+
+- [Driver Architecture Recap](#driver-architecture-recap)
+- [Packaging Constraint — Kernel↔Accelerant ABI Lockstep](#packaging-constraint--kernelaccelerant-abi-lockstep)
+- [Hardware Generations Affected](#hardware-generations-affected)
+- [Phase 1 — Cedar / Evergreen HDMI Corruption](#phase-1--cedar--evergreen-hdmi-corruption)
+  - [1.1 Pixel Clock Validation Per Connector Type](#11-pixel-clock-validation-per-connector-type)
+  - [1.2 Wrong Memory Controller Registers for Evergreen GPUs](#12-wrong-memory-controller-registers-for-evergreen-gpus)
+  - [1.3 HDMI-A Encoder Mode Returned DVI](#13-hdmi-a-encoder-mode-returned-dvi)
+  - [1.4 PCI ID Misidentification and Missing IDs](#14-pci-id-misidentification-and-missing-ids)
+- [Phase 1.5 — HDMI Guard-Band Magenta Stripe](#phase-15--hdmi-guard-band-magenta-stripe)
+- [Phase 2 — APU, PLL, DPMS, DisplayPort](#phase-2--apu-pll-dpms-displayport)
+  - [2.1 APU VRAM Misdetection](#21-apu-vram-misdetection)
+  - [2.2 Chip Flag Corrections](#22-chip-flag-corrections)
+  - [2.3 Spread Spectrum Constant Bug](#23-spread-spectrum-constant-bug)
+  - [2.4 PLL Clock Routing](#24-pll-clock-routing)
+  - [2.5 DPMS / eDP Power Sequencing](#25-dpms--edp-power-sequencing)
+  - [2.6 DisplayPort Link Training](#26-displayport-link-training)
+- [Phase 3 — EDID Range Parser & Forced Linear Scanout](#phase-3--edid-range-parser--forced-linear-scanout)
+  - [3.1 EDID Range Parser Hardening](#31-edid-range-parser-hardening)
+  - [3.2 Forced Linear-Aligned Scanout](#32-forced-linear-aligned-scanout)
+- [Phase 4 — Caicos High-Bandwidth Mode Cap](#phase-4--caicos-high-bandwidth-mode-cap)
+- [Bug Tracker Cross-Reference](#bug-tracker-cross-reference)
+- [Files Modified — Complete List](#files-modified--complete-list)
+- [Reference: Linux Radeon Driver](#reference-linux-radeon-driver)
+
+---
+
+## Driver Architecture Recap
+
+The Haiku `radeon_hd` driver is split across two layers:
+
+| Component | Path | Runs in | Responsibilities |
+|-----------|------|---------|------------------|
+| **Kernel driver** | `src/add-ons/kernel/drivers/graphics/radeon_hd/` | Kernel space | PCI device enumeration, MMIO mapping, VRAM detection, interrupt delivery |
+| **Accelerant** | `src/add-ons/accelerants/radeon_hd/` | User space | Mode setting, GPU memory controller programming, encoder/PLL configuration, DP link training |
+
+The two halves communicate through the standard Haiku graphics ioctl interface
+and a shared memory region containing the chipset descriptor. They must be
+ABI-compatible — i.e., always built from the same source tree — because the
+shared structures (`evergreen_gpu_state`, etc.) are defined once and used by
+both sides.
+
+![Driver Architecture](../diagrams/radeon-driver-architecture.svg)
+
+---
+
+## Packaging Constraint — Kernel↔Accelerant ABI Lockstep
+
+This is a hard rule for distributing the fork as a `.hpkg`, and for any
+hand-installation that bypasses the package manager.
+
+### Why It Matters
+
+The kernel driver allocates an `accelerant_info` struct (declared in
+`headers/private/graphics/radeon_hd/accelerant.h`) and exposes it to the
+userland accelerant via `clone_area`. Both halves dereference fields off
+that struct directly — there is no marshalling layer, no version
+negotiation, and no padding/reserved-space discipline that would let the
+two sides drift independently.
+
+This fork's Phase 1 patch added an `evergreen_gpu_state` member to
+`accelerant_info` to hold the saved CRTC state used by the new
+Evergreen-specific MC halt/resume path. That changes the in-memory
+layout of `accelerant_info` versus the stock Haiku build:
+
+```
+              Stock build              Fork build
+              ───────────              ──────────
+              accelerant_info {        accelerant_info {
+                  ... shared ...           ... shared ...
+                  shared_info* si;         shared_info* si;
+                  area_id area_*;          area_id area_*;
+                  // (end)              +  evergreen_gpu_state evgState;
+              }                        }
+```
+
+If the kernel driver and accelerant are built from different trees, the
+side that allocated the struct and the side that maps it disagree on
+total size, field offsets, or both. Reads and writes after the divergence
+point land on garbage memory. Symptoms range from immediate crash on
+first `B_ACCELERANT_OPEN` to silent corruption of CRTC state during the
+first mode set.
+
+### Scope of the Constraint
+
+| Header changed | Cross-binary contract? | Mixing risk |
+|----------------|------------------------|-------------|
+| `accelerant.h` (`accelerant_info` struct) | **Yes** | High — layout disagreement → crash/corruption |
+| `evergreen_reg.h` (register defines) | No — values compile into binaries | None |
+
+Only `accelerant.h` is load-bearing here. Pure register-define headers
+have no cross-binary ABI surface. Future patches that touch
+`accelerant.h` (or any other shared struct in the private header tree)
+must be evaluated against this same constraint.
+
+### Distribution Rules
+
+1. **Ship both binaries in the same `.hpkg`, built from the same source
+   tree.** Never publish a release that contains only the kernel driver
+   or only the accelerant.
+2. **Use install paths that override both atomically.** The
+   `~/config/non-packaged/...` paths in the README satisfy this — the
+   loader picks user paths first for both, so either both override or
+   neither does.
+3. **Do not document or recommend hand-copying individual files.** A
+   user who copies just `radeon_hd.accelerant` from the fork on top of a
+   stock kernel driver (or vice versa) will produce the exact mixed-ABI
+   crash this section warns about.
+4. **If a future v2 packaging uses `PROVIDES: radeon_hd compat>=...`**
+   semantics with conflict declarations against the stock package, the
+   atomic unit must still be both binaries together.
+
+### Why a Cleaner Cross-Binary Contract Wasn't Used
+
+`accelerant_info` is private to radeon_hd and has always been treated as
+internal — it is not part of any documented Haiku API and there is no
+ABI version field. Adding versioning machinery now would be more
+disruptive than the current rule (ship-both-together), because the
+struct is consumed in dozens of places across the accelerant. The
+ship-both rule costs nothing in practice — both binaries always travel
+together anyway — and avoids any change to the in-tree convention.
+
+---
+
+## Hardware Generations Affected
+
+| Generation | DCE | Codename Examples | Potential Test GPU | Potential Test CPU (APU) | P1 | P1.5 | P2 | P3 | P4* |
+|------------|-----|-------------------|--------------------|--------------------------|:--:|:----:|:--:|:--:|:--:|
+| Evergreen | 4.x | Cedar, Redwood, Juniper, Cypress | **✅ HD 5450 (`0x68f9`, Cedar).** Broader: HD 5770 (Juniper) or HD 5870 (Cypress) for the larger Evergreen MC variants | — | ✅ | ✅ | ✅ | ✅ | — |
+| Northern Islands | 5.x | Caicos, Turks, Barts, Cayman | **✅ HD 7470/8470 OEM (`0x6778`, Caicos XT).** NEXT: HD 6570 (Turks), HD 6850 (Barts), HD 6950 (Cayman) | — | — | — | ✅ | ✅ | ✅ (Caicos only) |
+| Southern Islands | 6.x | Cape Verde, Pitcairn, Tahiti, **Aruba (APU)** | HD 7770 (Cape Verde), HD 7870 (Pitcairn), or HD 7970 (Tahiti) | A10-5800K / A8-5600K (Trinity) **or** A10-6800K / A8-6600K (Richland) on Socket FM2  | — | — | ✅ | ✅ | — |
+| Sea Islands | 8.x | Bonaire, Hawaii, **Kaveri/Kabini/Mullins (APU)** | R7 260X (Bonaire) or R9 290/290X (Hawaii) | A10-7860K / A10-7850K (Kaveri, Socket FM2+), Athlon 5350 / Sempron 3850 (Kabini, Socket AM1), or any Mullins laptop (e.g. A4 Micro-6400T) | — | — | ✅ | ✅ | — |
+| Volcanic Islands | 11.0 / 11.1 | **Carrizo (APU)**, **Stoney (APU)** | — | Carrizo laptop: FX-8800P, A10-8700P, A8-8600P. Stoney laptop: A9-9410, A6-9220, E2-9000. | — | — | ✅ | ✅ | — |
+| Polaris | 11.2 | Polaris10, Polaris11, Polaris12 | **RX 580** / RX 590 (Polaris10), RX 460 / RX 560 (Polaris11), or RX 540 / RX 550 (Polaris12) | — | — | — | ✅ | ✅ | — |
+| Vega | 12.0 | **Raven (APU)** | — | Ryzen 5 2400G / Ryzen 3 2200G (Raven Ridge, Socket AM4) **or** Ryzen 5 3400G / Ryzen 3 3200G (Picasso, Socket AM4) | — | — | ✅ | ✅ | — |
+
+\* P4 ships as a per-chip pixel-clock cap on Caicos only. Other Northern
+Islands chips (Turks / Barts / Cayman) have wider memory buses and likely
+tolerate higher modes; they're left uncapped pending hardware testing. See
+the Phase 4 section for the full investigation.
+
+### Notes on choosing test cards
+
+- **Within a chip pair the bin doesn't matter for the driver.** HD 6850
+  vs HD 6870 are both `RADEON_BARTS` — same code path, same registers,
+  just different clock bin. Same for HD 6950 vs HD 6970 (both
+  `RADEON_CAYMAN`). Buy whichever is cheaper used.
+- **Look for DisplayPort-equipped cards** when targeting 4K-class tests.
+  Barts and Cayman launched with DP 1.2 (HBR2 5.4 Gbps) which is
+  sufficient for 4K@60Hz at the link layer. The DVI/HDMI outputs on
+  these cards are limited to HDMI 1.4a (4K@30Hz max), which would
+  defeat the bandwidth-ceiling test.
+- **Turks (HD 6570 / HD 6670)** is the natural "in-between" data point
+  if the Caicos cap turns out to need extending: 128-bit memory bus
+  (~2× Caicos's 64-bit, ~½ Barts's 256-bit), DCE 5, separate
+  `RADEON_TURKS` enum and code path. Cheap on the used market and
+  worth picking up alongside any Barts/Cayman test card.
+
+Bold entries are integrated GPUs (APUs) sharing system RAM via UMA — these
+are particularly impacted by the VRAM-detection and chip-flag fixes in
+Phase 2.
+
+### Recommended Test Bench Combinations
+
+To minimize the number of physical machines needed, several generations
+can be exercised in a single box:
+
+| Build | Covers |
+|-------|--------|
+| Socket FM2 motherboard + A10-6800K (Richland) + HD 7870 (Pitcairn) | Southern Islands discrete *and* Aruba APU in one boot |
+| Socket FM2+ motherboard + A10-7860K (Kaveri) + R9 290 (Hawaii) | Sea Islands discrete *and* Sea Islands APU in one boot |
+| Socket AM4 motherboard + Ryzen 5 2400G (Raven Ridge) + RX 580 (Polaris10) | Vega APU *and* Polaris in one boot |
+| Carrizo or Stoney laptop | Volcanic Islands APU (the only practical way — VI APUs are BGA) |
+
+Two test rigs (one FM2/FM2+ tower, one AM4 tower) plus one Carrizo/Stoney
+laptop cover every Phase 2 generation the fork patches. Existing
+hardware (the HD 5450 and HD 7470/8470 OEM) already covers Phase 1,
+Phase 1.5, and Northern Islands, which sit outside the combo plan above.
+
+### PCI ID Quick-Reference for Sourcing
+
+Useful when scanning eBay listings — sellers rarely list PCI IDs, but
+codename + model number is enough; confirm with the device on first
+boot via `listdev`:
+
+| Codename | Card / CPU | PCI ID range |
+|----------|------------|--------------|
+| Cape Verde | HD 7750 / 7770 | `0x6820`–`0x683F` |
+| Pitcairn | HD 7850 / 7870 | `0x6800`–`0x681F` |
+| Tahiti | HD 7950 / 7970 | `0x6798`–`0x679E` |
+| Aruba | A10-5800K / 6800K APU | `0x9900`–`0x9907` |
+| Bonaire | R7 260 / 260X | `0x6650`–`0x665F` |
+| Hawaii | R9 290 / 290X | `0x67A0`–`0x67BF` |
+| Kaveri | A10-7850K / 7860K APU | `0x1304`–`0x131D` |
+| Kabini | Athlon 5350 APU | `0x9830`–`0x983D` |
+| Mullins | A4 Micro-6400T APU | `0x9850`–`0x9877` |
+| Carrizo | FX-8800P / A10-8700P APU | `0x9874` |
+| Stoney | A9-9410 / A6-9220 APU | `0x98E4` |
+| Polaris10 | RX 470 / 480 / 570 / 580 / 590 | `0x67C0`–`0x67FF` |
+| Polaris11 | RX 460 / 560 | `0x67E0`–`0x67EF` (within the P10 range) |
+| Polaris12 | RX 540 / 550 | `0x6980`–`0x699F` |
+| Raven | Ryzen 2200G / 2400G / 3200G / 3400G APU | `0x15D8`, `0x15DD`, `0x15D9` |
+
+---
+
+## Phase 1 — Cedar / Evergreen HDMI Corruption
+
+**Symptom.** Cedar-class Radeon GPUs (HD 5400 / 6300 / 7300) connected via HDMI
+displayed a garbled/corrupted image under Haiku. The display would appear
+scrambled, with pixel data visibly wrong despite the monitor receiving a
+signal. Affected real hardware including PCI IDs like `0x68f9` (HD 5450), and
+was especially noticeable when the system attempted higher resolutions.
+
+**Root cause.** Four independent bugs combined to produce the corruption.
+Individually any one of them might have caused only subtle issues, but
+together they guaranteed corruption on Cedar HDMI setups.
+
+### 1.1 Pixel Clock Validation Per Connector Type
+
+**File:** `src/add-ons/accelerants/radeon_hd/mode.cpp`
+
+#### Problem
+
+The `is_mode_supported()` function had no awareness of physical connector
+bandwidth limits. It would happily accept a 4K@60Hz mode (requiring
+~533 MHz pixel clock) on a Cedar GPU over HDMI, even though HDMI single-link
+TMDS maxes out at 165 MHz on pre-DCE6 hardware.
+
+Without this validation, the driver would attempt to program impossible pixel
+clocks. The PLL would either fail to lock, lock on a harmonic, or produce a
+clock that the encoder could not transport correctly — all of which manifest
+to the user as "garbled display."
+
+#### Fix
+
+Added pixel clock validation that enforces:
+
+| Connector Type | Max Pixel Clock | Notes |
+|----------------|----------------|-------|
+| HDMI-A (pre-DCE6) | 165 MHz | Single-link TMDS limit |
+| HDMI-A (DCE6+) | 340 MHz | HDMI 1.3+ support |
+| DVI-D / DVI-I | 165 MHz | Single-link; dual-link not yet distinguished |
+| HDMI-B | 340 MHz | Electrically dual-link DVI |
+
+Modes exceeding the limit are now rejected by `is_mode_supported()` before
+they ever reach the PLL programming path.
+
+![Pixel Clock Validation Flow](../diagrams/pixel-clock-validation.svg)
+
+### 1.2 Wrong Memory Controller Registers for Evergreen GPUs
+
+**File:** `src/add-ons/accelerants/radeon_hd/gpu.cpp`
+
+#### Problem
+
+The driver used **AVIVO-era** (R500/R600) memory controller halt/resume
+functions for **all** GPU generations, including Evergreen (DCE4+). The
+AVIVO functions use register addresses like `0x6080` (`D1CRTC_CONTROL`),
+which map to completely different (or nonexistent) functions on Evergreen
+hardware, where the correct CRTC base is `0x6e70`
+(`EVERGREEN_CRTC_CONTROL`).
+
+The cascading consequences were:
+
+- The old code only handled 2 CRTCs; Evergreen supports up to 6.
+- AVIVO surface address registers are 32-bit; Evergreen uses 64-bit (high +
+  low pair).
+- Writing to wrong register addresses during MC halt/resume corrupted display
+  state non-deterministically.
+- No double-buffer locking meant surface address updates could tear.
+
+#### Fix
+
+Added dedicated `evergreen_gpu_mc_halt()` and `evergreen_gpu_mc_resume()`
+functions that:
+
+- Use the correct Evergreen register addresses for all operations.
+- Handle all 6 CRTCs via the standard offset table.
+- Properly lock/unlock double-buffered registers (`GRPH_UPDATE_LOCK`,
+  `MASTER_UPDATE_LOCK`).
+- Write 64-bit surface addresses (high word first, then low — required by
+  the hardware double-buffer latch).
+- Use VBlank-synchronized blanking via `CRTC_DISP_READ_REQUEST_DISABLE`.
+- Wait for the surface-update-pending bit to clear before re-enabling CRTCs.
+
+Two callers were updated to use the Evergreen-specific path when
+`chipsetID >= RADEON_CEDAR`:
+
+- `radeon_gpu_reset()` — full GPU reset path.
+- `radeon_gpu_mc_setup_evergreen()` — MC base address reconfiguration path.
+
+Saved/restored CRTC state lives in a new `evergreen_gpu_state` struct
+declared in `accelerant.h`, sized to hold per-CRTC control words and surface
+address pairs for all 6 CRTCs.
+
+![MC Halt/Resume Flow](../diagrams/mc-halt-resume-flow.svg)
+
+### 1.3 HDMI-A Encoder Mode Returned DVI
+
+**File:** `src/add-ons/accelerants/radeon_hd/display.cpp`
+
+#### Problem
+
+In `display_get_encoder_mode()`, the `VIDEO_CONNECTOR_HDMIA` case fell
+through to the default and returned `ATOM_ENCODER_MODE_DVI`. HDMI connectors
+were therefore configured as DVI encoders, suppressing HDMI-specific
+signaling (no audio capability, wrong infoframes, no AVI infoframe at all).
+
+```
+Before (simplified):
+  case VIDEO_CONNECTOR_DVID:
+  case VIDEO_CONNECTOR_HDMIA:
+  default:
+      return ATOM_ENCODER_MODE_DVI;   // HDMI treated as DVI
+
+After:
+  case VIDEO_CONNECTOR_HDMIA:
+      return ATOM_ENCODER_MODE_HDMI;  // Correct HDMI mode
+  case VIDEO_CONNECTOR_DVID:
+  default:
+      return ATOM_ENCODER_MODE_DVI;
+```
+
+#### Caveat (see Phase 1.5)
+
+Returning `ATOM_ENCODER_MODE_HDMI` exposed a separate problem: the encoder
+emits data-island guard bands during HBLANK, but the HDMI infoframe / audio
+packet registers are not yet programmed by the Haiku driver. That guard-band
+data is decoded by the receiver as visible pixels, producing a magenta stripe
+on the left edge of the active region. **Phase 1.5 reverts this case to the
+DVI fallback** as a conservative measure until full HDMI infoframe support
+lands.
+
+### 1.4 PCI ID Misidentification and Missing IDs
+
+**File:** `src/add-ons/kernel/drivers/graphics/radeon_hd/driver.cpp`
+
+#### Problem 1 — Misidentified chip
+
+PCI ID `0x68fa` was listed as `RADEON_CAICOS` (DCE5, Northern Islands) when
+it is actually a **Cedar** chip (DCE4, Evergreen). With the wrong chipset
+ID, the driver loads the wrong register sets, takes the wrong power
+management paths, and selects the wrong MC programming code (which, until
+fix 1.2, did not exist for Evergreen anyway).
+
+```
+Before: {0x68fa, 5, 0, RADEON_CAICOS, ...}
+After:  {0x68fa, 4, 0, RADEON_CEDAR,  ...}
+```
+
+#### Problem 2 — Missing Cedar PCI IDs
+
+Seven Cedar variants were absent entirely from the device table. Cards with
+these IDs would not even bind to the driver:
+
+| PCI ID | Description |
+|--------|-------------|
+| `0x68e5` | Radeon HD 6300M (Mobile) |
+| `0x68e8` | Radeon HD Cedar |
+| `0x68e9` | Radeon HD Cedar |
+| `0x68f1` | Radeon HD 5450 |
+| `0x68f2` | Radeon HD Cedar |
+| `0x68f8` | Radeon HD 7300 |
+| `0x68fe` | Radeon HD Cedar |
+
+Added all seven to the table with the correct Cedar / DCE4 chipset
+descriptors.
+
+---
+
+## Phase 1.5 — HDMI Guard-Band Magenta Stripe
+
+**File:** `src/add-ons/accelerants/radeon_hd/display.cpp`
+**Commit:** `2f542cc5ed` — *radeon_hd: drive HDMI connectors as DVI until infoframes are implemented*
+**Date:** 2026-04-27
+
+### Problem
+
+After Phase 1 fix 1.3 began returning `ATOM_ENCODER_MODE_HDMI` for HDMI-A
+connectors, real Cedar/Evergreen hardware began producing a visible magenta
+stripe on the left edge of the active region.
+
+Root cause: with `ATOM_ENCODER_MODE_HDMI` selected, the AtomBIOS-programmed
+encoder begins emitting data-island guard bands during HBLANK. Those guard
+bands carry HDMI infoframes and audio packets — *if* the infoframe and audio
+packet registers are programmed:
+
+- `HDMI_INFOFRAME_CONTROL0`
+- `HDMI_GENERIC_PACKET_CONTROL`
+- `HDMI_VBI_PACKET_CONTROL`
+- `AFMT_AUDIO_PACKET_CONTROL`
+
+Haiku's driver does not yet program any of these registers for DCE4+. The
+encoder ends up emitting *unconfigured* guard bands. The receiver decodes
+those guard-band symbols as pixel data, producing the magenta stripe at the
+start of every active line.
+
+### Solution
+
+Mirror Linux's behavior: only request `ATOM_ENCODER_MODE_HDMI` when audio is
+actually enabled and the infoframe path is functional. Until HDMI audio +
+infoframe setup lands for DCE4+, drive HDMI connectors as DVI. HDMI is
+electrically backward-compatible with DVI, so video works correctly without
+the data island — the only thing missing is HDMI audio, which the driver
+does not yet support anyway.
+
+### Why Not Just Program the Infoframe Registers?
+
+Programming infoframes correctly requires AVI/audio infoframe construction,
+audio clock recovery setup (ACR), packet pacing, and per-DCE-version
+register layout knowledge. That is a meaningful piece of work in its own
+right and depends on the audio path being wired up. Treating HDMI as DVI is
+the correct **conservative** default — image quality is right, audio is
+absent, and the path forward (programming the registers and re-enabling
+`ATOM_ENCODER_MODE_HDMI`) does not change.
+
+---
+
+## Phase 2 — APU, PLL, DPMS, DisplayPort
+
+The Phase 2 set covers a broader range of generations than Phase 1, focused
+on APUs and DisplayPort.
+
+### 2.1 APU VRAM Misdetection
+
+**File:** `src/add-ons/kernel/drivers/graphics/radeon_hd/radeon_hd.cpp`
+**Priority:** CRITICAL
+**Bugs:** [#17664], [#10939], [#18470]
+
+#### Problem
+
+APUs (like AMD Trinity/Richland "Aruba") don't have dedicated VRAM — they
+carve a portion of system RAM for GPU use via UMA (Unified Memory
+Architecture). The VRAM detection code used a simple enum comparison
+`chipsetID >= RADEON_TAHITI` to decide which register to read:
+
+```
+VRAM size register selection (BEFORE):
+  chipsetID >= TAHITI  →  CONFIG_MEMSIZE_TAHITI (0x03de)  ← reads MB
+  chipsetID >= CEDAR   →  CONFIG_MEMSIZE        (0x5428)  ← reads MB or bytes
+```
+
+The enum ordering is the trap: `RADEON_ARUBA` (105) comes *after*
+`RADEON_TAHITI` (104), so Aruba APUs hit the `>= TAHITI` branch and read
+`CONFIG_MEMSIZE_TAHITI`. That register only reports dedicated VRAM — on an
+APU with no dedicated VRAM, it returns **zero**. Consequences:
+
+- 0 MB VRAM detection.
+- `app_server` crash when trying to map a zero-size framebuffer.
+- Complete boot failure on affected hardware.
+
+#### Solution
+
+Added a `CHIP_APU` flag check within the `>= RADEON_TAHITI` path. APUs read
+`CONFIG_MEMSIZE` (which reports their UMA allocation in bytes), while
+discrete GPUs continue reading `CONFIG_MEMSIZE_TAHITI`.
+
+![VRAM Detection Decision Flow](../diagrams/vram-detection-flow.svg)
+
+#### Affected Chipsets
+
+All APUs in the Tahiti+ enum range:
+
+| Chipset | Enum | Generation | DCE |
+|---------|------|------------|-----|
+| Aruba | 105 | Southern Islands | 6.1 |
+| Kaveri | 108 | Sea Islands | 8.1 |
+| Kabini | 110 | Sea Islands | 8.3 |
+| Mullins | 111 | Sea Islands | 8.3 |
+| Carrizo | 116 | Volcanic Islands | 11.0 |
+| Stoney | 117 | Volcanic Islands | 11.1 |
+| Raven | 125 | Vega | 12.0 |
+
+### 2.2 Chip Flag Corrections
+
+**File:** `src/add-ons/kernel/drivers/graphics/radeon_hd/driver.cpp`
+**Priority:** HIGH
+
+#### Problem
+
+Kaveri, Kabini, and Mullins were all tagged as `CHIP_STD` (standard /
+discrete) in the PCI device ID table. They are APUs — integrated graphics
+sharing system RAM, not discrete GPUs with dedicated VRAM. The incorrect
+flag meant:
+
+1. The VRAM detection fix (2.1) couldn't help them, since it checks
+   `CHIP_APU`.
+2. Any other APU-specific code paths were skipped.
+3. The PLL fractional feedback divider (set for APUs in `pll_setup_flags`)
+   was never enabled.
+
+#### Solution
+
+Changed all Kaveri (24 entries), Kabini (18 entries), and Mullins (16
+entries) from `CHIP_STD` to `CHIP_APU` in the PCI device table — 58 entries
+total.
+
+### 2.3 Spread Spectrum Constant Bug
+
+**File:** `src/add-ons/accelerants/radeon_hd/display.cpp`
+**Priority:** MEDIUM
+**Bugs:** [#8339], [#8154]
+
+#### Problem
+
+The `display_crtc_ss()` function configures spread spectrum modulation on
+the pixel clock PLL. Spread spectrum intentionally "wobbles" the clock
+frequency slightly to reduce electromagnetic interference (EMI). The
+function has two code paths:
+
+- **V3 path** (DCE 5+ / Northern Islands): uses `ATOM_PPLL_SS_TYPE_V3_*`
+  constants.
+- **V2 path** (DCE 4.x / Evergreen): should use `ATOM_PPLL_SS_TYPE_V2_*`
+  constants.
+
+The bug: in the V2 path, `ATOM_PPLL1` correctly used
+`ATOM_PPLL_SS_TYPE_V2_P1PLL`, but `ATOM_PPLL2` and `ATOM_DCPLL` incorrectly
+used V3 constants (`ATOM_PPLL_SS_TYPE_V3_P2PLL` and
+`ATOM_PPLL_SS_TYPE_V3_DCPLL`).
+
+![Spread Spectrum Constant Bug](../diagrams/spread-spectrum-bug.svg)
+
+#### Solution
+
+Replaced the two V3 constants with their V2 equivalents in the DCE 4.x
+code path. The numeric values happen to match in current AtomBIOS headers
+(both V2 and V3 use `0x04` for P2PLL and `0x08` for DCPLL), so this is
+nominally a no-op today. It is still a correctness bug — the constants
+belong to different table structures and could diverge in any future BIOS
+revision. Fixing it costs nothing and removes the latent landmine.
+
+### 2.4 PLL Clock Routing
+
+**File:** `src/add-ons/accelerants/radeon_hd/pll.cpp`
+**Priority:** HIGH
+**Bugs:** [#8485], Polaris display support
+
+Three sub-fixes in this area.
+
+#### 2.4a — `pll_pick()` DCE 6.1 Guard
+
+`pll_pick()` selects which PLL hardware to use for a given connector. It
+had a special case for DCE 6.1 (Aruba) APUs that forces `ATOM_PPLL2` for
+UNIPHYA on linkA. However, the code **didn't check the DCE version** — it
+would force PPLL2 on *any* card with `INTERNAL_UNIPHY` on linkA,
+potentially causing wrong PLL selection on non-Aruba hardware.
+
+**Fix:** Added a `dceVersion == 601` guard so the override fires only for
+Aruba.
+
+#### 2.4b — `pll_external_init()` Polaris Routing
+
+`pll_external_init()` initializes the display engine PLL clock. It routed
+cards to different backends:
+
+- `dceMajor >= 12` → `pll_set_dce()` (uses SetDCEClock AtomBIOS table).
+- `dceMajor >= 6`  → `pll_set_external()` (uses SetPixelClock AtomBIOS
+  table).
+
+Polaris (DCE 11.2) landed in the `>= 6` path, but its BIOS uses
+**SetPixelClock v1.7** which `pll_set_external()` didn't support. The
+function would hit the default/error case and fail silently — Polaris would
+boot with no display output.
+
+**Fix:** Changed the threshold from `dceMajor >= 12` to
+`dceVersion >= 1102` so Polaris correctly uses `pll_set_dce()`.
+
+#### 2.4c — `pll_set_external()` v1.7 Fallback
+
+Added SetPixelClock v1.7 handling as a defense-in-depth fallback in
+`pll_set_external()`, in case any hardware with a v1.7 table still reaches
+this function despite the routing fix above (e.g., a future card with an
+unexpected DCE version).
+
+![PLL Clock Routing Fixes](../diagrams/pll-routing-fix.svg)
+
+### 2.5 DPMS / eDP Power Sequencing
+
+**File:** `src/add-ons/accelerants/radeon_hd/encoder.cpp`
+**Priority:** HIGH
+**Bugs:** Affects all eDP (laptop) and DP displays
+
+#### Problem
+
+`encoder_dpms_set_dig()` handles display power management (turning displays
+on/off). It had three TODO stubs for critical operations:
+
+1. **eDP panel power-on** — embedded DisplayPort panels (laptops) need
+   explicit power sequencing via AtomBIOS before the transmitter can be
+   enabled.
+2. **DP receiver D3 sleep** — external DP monitors should be told to enter
+   low-power mode (DPCD register `0x600`) when the display is turned off.
+3. **eDP panel power-off** — completing the shutdown sequence for embedded
+   panels.
+
+Without these, eDP displays would fail to initialize (no power → no link),
+and DP monitors would never properly sleep (wasting power and potentially
+preventing system sleep).
+
+#### Solution
+
+Implemented all three TODO stubs using the existing infrastructure:
+
+- `transmitter_dig_setup()` with `ATOM_TRANSMITTER_ACTION_POWER_ON` /
+  `ATOM_TRANSMITTER_ACTION_POWER_OFF` for eDP power sequencing.
+- `dpcd_reg_write()` with `DP_SET_POWER` / `DP_SET_POWER_D3` for DP
+  receiver sleep.
+
+Also implemented the **Travis quirk**: the Travis external DP bridge (used
+on some DCE < 5 laptops) requires the transmitter to be disabled *before*
+sending the D3 sleep command, unlike normal DP where D3 is sent first. The
+order is detected from the encoder type and inverted accordingly.
+
+![DPMS Power Sequencing](../diagrams/dpms-edp-power-sequence.svg)
+
+### 2.6 DisplayPort Link Training
+
+**File:** `src/add-ons/accelerants/radeon_hd/displayport.cpp`
+**Priority:** HIGH
+**Bugs:** [#8485], [#18470]
+
+Three sub-fixes.
+
+#### 2.6a — Enable DP 1.2 HBR2 (5.4 Gbps)
+
+DP 1.2 HBR2 (High Bit Rate 2) support was fully implemented in code but
+disabled behind `#if 0`. The `dp_is_dp12_capable()` function properly
+checks for:
+
+- DCE >= 5 hardware.
+- External DP clock >= 539 MHz.
+- Encoder HBR2 capability in BIOS cap record.
+
+With HBR2 disabled, any display requiring more than 2.7 Gbps bandwidth
+would fail or fall back to an unknown link rate. HBR2 is needed for
+resolutions like 2560×1440@60Hz or 4K@30Hz over a single DP link.
+
+**Fix:** Removed the `#if 0` guard, enabling the 540000 kHz (5.4 Gbps)
+link rate path.
+
+#### 2.6b — Link Training Return Value Checking
+
+`dp_link_train()` called `dp_link_train_cr()` (clock recovery) and
+`dp_link_train_ce()` (channel equalization) but **never checked their
+return values**. If either phase failed, the function proceeded as if
+training succeeded, leading to a non-functional DP link with no error
+indication anywhere in the logs.
+
+#### 2.6c — Link Training Retry With Rate Fallback
+
+When link training fails (marginal cable, long run, signal-integrity
+issues), the DisplayPort specification allows the source to retry at a
+lower link rate. The driver now:
+
+1. Attempts training at the current link rate.
+2. If clock recovery or channel equalization fails, reduces the rate
+   (540 → 270 → 162 MHz).
+3. Retries training at the lower rate.
+4. Reports success/failure with the actual rate achieved.
+
+![DP Link Training Flow](../diagrams/dp-link-training-flow.svg)
+
+---
+
+## Phase 3 — EDID Range Parser & Forced Linear Scanout
+
+**Symptom.** Bringing up an HD 7470 (Caicos XT, Northern Islands DCE 5) on a
+Haiku build that already had Phases 1, 1.5, and 2 applied surfaced two
+independent bugs simultaneously. Together they made the chip unusable on
+this card; separately each is a latent issue affecting other Evergreen+
+configurations.
+
+**Root cause.** A degenerate EDID range descriptor combined with an
+unsigned-underflow bug rejected every candidate display mode, then once mode
+selection was unblocked the framebuffer scanned out as if it were tiled
+because `GRPH_CONTROL`'s `ARRAY_MODE` field was inheriting whatever VBIOS POST
+left set.
+
+### 3.1 EDID Range Parser Hardening
+
+**Files:** `src/add-ons/accelerants/radeon_hd/mode.cpp`,
+`src/add-ons/accelerants/radeon_hd/display.cpp`
+
+#### Problem
+
+`is_mode_supported()` in `mode.cpp` rejected every candidate mode on the
+HD 7470 test setup. Even 640×480 @ 25.175 MHz — well below any pixel-clock
+cap — was logged as `BAD, out of range!`. The driver fell back to the VESA
+framebuffer and the desktop was unusable.
+
+The EDID range check that did the rejecting:
+
+```c
+// uint32 fields, populated from edid1_monitor_range (uint8 source)
+if (hfreq > gDisplay[crtid]->hfreqMax + 1
+    || hfreq < gDisplay[crtid]->hfreqMin - 1) {
+    sane = false;
+}
+```
+
+Two compounding causes:
+
+1. **Unsigned underflow.** If `hfreqMin == 0`, then `hfreqMin - 1` underflows
+   the unsigned subtraction to `0xFFFFFFFF`, and `hfreq < 0xFFFFFFFF` is
+   always true for any real `hfreq`. Every mode is silently rejected.
+
+2. **Degenerate EDID descriptor.** The test monitor emitted a
+   MONITOR_RANGES descriptor with `min_h == max_h == 160` kHz. A "range"
+   collapsed to a single point, far above any real horizontal scan rate
+   (typical monitors: 30–83 kHz). The parser accepted it as authoritative
+   and the freq comparison rejected everything that didn't match exactly
+   160 kHz — i.e. everything.
+
+A diagnostic TRACE added during investigation confirmed the parsed range:
+
+```
+detect_crt_ranges: ignoring bogus EDID range descriptor (h=160-160 kHz, v=40-60 Hz)
+is_mode_supported: hfreq 31 outside EDID range [160, 160]
+```
+
+#### Fix
+
+`detect_crt_ranges()` in `display.cpp` now validates the descriptor before
+returning `B_OK`. If any bound is zero or a "range" is degenerate / inverted,
+the descriptor is treated as unusable and `foundRanges` stays false — which
+causes `is_mode_supported()` to skip the EDID range check entirely on broken
+descriptors:
+
+```c
+if (range.min_h == 0 || range.max_h == 0 || range.min_v == 0
+    || range.max_v == 0 || range.max_h <= range.min_h
+    || range.max_v <= range.min_v) {
+    TRACE("%s: ignoring bogus EDID range descriptor "
+        "(h=%u-%u kHz, v=%u-%u Hz)\n", __func__,
+        range.min_h, range.max_h, range.min_v, range.max_v);
+    return B_ERROR;
+}
+```
+
+`is_mode_supported()` in `mode.cpp` reformulates the lower-bound test to be
+underflow-safe — adding 1 to the freq side rather than subtracting 1 from
+the min side:
+
+```c
+// freq + 1 < min  is equivalent to  freq < min - 1, but doesn't underflow
+// when min == 0 because freq + 1 is always >= 1.
+if (hfreq + 1 < gDisplay[crtid]->hfreqMin) sane = false;
+if (vfreq + 1 < gDisplay[crtid]->vfreqMin) sane = false;
+```
+
+The comparisons now also TRACE the actual freq and parsed range so future
+range-related issues are diagnosable from syslog without re-instrumenting.
+
+#### Verification
+
+HD 7470 with the bad EDID: full mode list passes validation, driver
+progresses through PLL/encoder/CRTC programming successfully.
+
+### 3.2 Forced Linear-Aligned Scanout
+
+**Files:** `src/add-ons/accelerants/radeon_hd/display.cpp`,
+`headers/private/graphics/radeon_hd/evergreen_reg.h`
+
+#### Problem
+
+After Phase 3.1 unblocked mode rejection, the screen scanned out as a flat
+blue field with garbled text fragments only on the first few rows. Register
+readbacks confirmed the chip was programmed correctly:
+
+```
+display_crtc_fb_set: readback CTRL=0x00100002 PITCH=3840 XEND=3840
+                     YEND=2160 VIEWPORT=0x0F000870 SURF=0x00000000
+```
+
+Depth = 32-bit, format = ARGB8888, viewport = 3840×2160, pitch = 3840
+pixels, surface address = 0. Everything we wrote was accepted by the chip
+without truncation.
+
+What we *didn't* write was the `ARRAY_MODE` field of `GRPH_CONTROL`
+(bits 20–23). `display_crtc_fb_set()` programmed depth and format only,
+leaving `ARRAY_MODE` at whatever VBIOS POST had set. On the HD 7470, VBIOS
+leaves a tiled mode set. The chip then scans the linear app_server
+framebuffer as if it were tiled — the first scanline is approximately
+right (the framebuffer base address still anchors to zero), but every
+subsequent scanline reads from a stride-mismatched offset and walks off
+the framebuffer into VBIOS POST leftovers / uninitialized VRAM.
+
+This is a long-standing latent bug: Evergreen+ cards whose VBIOS leaves
+`ARRAY_MODE` non-zero would have always produced garbled scanout. Cards
+whose VBIOS already cleared `ARRAY_MODE` (Cedar / HD 5450 / etc.) coasted
+on the default and never exposed the gap.
+
+#### Fix
+
+`display_crtc_fb_set()` in `display.cpp` now ORs in the appropriate
+`ARRAY_MODE` constant before writing `GRPH_CONTROL`:
+
+```c
+if (info.dceMajor >= 4) {
+    fbFormat |= EVERGREEN_GRPH_ARRAY_MODE(
+        EVERGREEN_GRPH_ARRAY_LINEAR_ALIGNED);
+} else {
+    fbFormat |= R600_D1GRPH_ARRAY_MODE_LINEAR_ALIGNED;
+}
+```
+
+The macro and value constants are added to `evergreen_reg.h`:
+
+```c
+#define EVERGREEN_GRPH_ARRAY_MODE(x)            (((x) & 0xf) << 20)
+#define EVERGREEN_GRPH_ARRAY_LINEAR_GENERAL     0
+#define EVERGREEN_GRPH_ARRAY_LINEAR_ALIGNED     1
+#define EVERGREEN_GRPH_ARRAY_1D_TILED_THIN1     2
+#define EVERGREEN_GRPH_ARRAY_2D_TILED_THIN1     4
+```
+
+`LINEAR_ALIGNED` is the right setting for scanout buffers: linear pixel
+layout with pitch alignment to a power of 2. This is what Linux's `radeon`
+driver always sets for scanout.
+
+#### Verification
+
+HD 7470 at 1920×1080: clean desktop renders. (At 4K@60Hz the same card
+displays severely stride-aliased garbage even though `ARRAY_MODE` is now
+correctly `LINEAR_ALIGNED` and all other registers read back correctly —
+that is a separate problem, addressed by Phase 4 below.)
+
+#### Reference
+
+Linux `evergreen.c` always sets `EVERGREEN_GRPH_ARRAY_MODE_LINEAR_ALIGNED`
+for scanout in `evergreen_grph_enable` / `dce_v6_0_grph_enable`.
+
+---
+
+## Phase 4 — Caicos High-Bandwidth Mode Cap
+
+**Status: investigated, root-cause identified, ship-as-cap.**
+
+This phase started with a 4K@60Hz scanout corruption on the HD 7470 test
+card and ended with a per-chip pixel-clock cap rather than a fix, after
+empirical evidence narrowed the cause to the linear-vs-tiled scanout
+architecture — a difference that lives outside the radeon_hd driver and so
+is out of scope for this driver-only fork.
+
+### Symptom
+
+HD 7470 (Caicos XT, Northern Islands DCE 5) renders a clean desktop at
+1920×1080 over DisplayPort but produces severe stride-aliased corruption at
+3840×2160 — most scanlines display garbage fanning out from the upper-right.
+
+Linux Mint 22.3 boots the same physical card on the same DisplayPort cable
+at 3840×2160 @ 60 Hz without issue, confirming the hardware is capable. The
+gap is therefore in driver work that Linux does and Haiku doesn't.
+
+### Diagnostic state during investigation
+
+Register readback after a 4K mode-set on the test card:
+
+```
+CTRL = 0x00100002    DEPTH=32BPP, FORMAT=ARGB8888, ARRAY=LINEAR_ALIGNED
+PITCH = 3840         (pixels)
+XEND = 3840  YEND = 2160
+VIEWPORT = 0x0F000870  (3840 << 16 | 2160)
+SURF = 0  SURF_HI = 0
+```
+
+Every value is exactly what `display_crtc_fb_set()` wrote. No field
+truncation. The framebuffer mapping reports 256 MB available, far more
+than the ~32 MB needed for 4K@32bpp. The DisplayPort link trains
+successfully at HBR2 (5.4 Gbps × 4 lanes, plenty for 4K@60).
+
+### Root-cause hypothesis
+
+The driver has **zero memory-controller display-priority / line-buffer
+watermark programming**. A grep across both halves of the driver for
+`WATERMARK | PRIORITY | LB_DESKTOP | LB_MEMORY | DPG_PIPE_LATENCY` returns
+no source hits. SI register defines exist in `si_reg.h:237-260` but are
+never written by any code path. Evergreen, NI, and CIK headers don't even
+have the defines.
+
+Without priority/watermark programming, the MC arbiter has no way to know
+that scanout DMA is bandwidth-critical. At 1080p the bandwidth budget is
+loose enough to coast on hardware defaults; at 4K@60Hz × 32bpp (~17 Gbps
+sustained) the display FIFO underruns and the chip emits whatever happens
+to be in the pipe. This matches the observed stride-aliased pattern.
+
+### What the AMD reference docs cover (and don't)
+
+The PDFs at `C:\Code\Syllable\RefDocs\GPU\AMD\` labeled `Radeon Evergreen
+Northern Islands Acceleration.pdf` and `evergreen_cayman_programming_guide.pdf`
+are byte-identical and both cover only shader/3D programming (Compute, DB/CB,
+PM4) — not the display engine. The Southern Islands programming guide is
+the same. **None of the AMD docs in the collection document the display
+engine, MC priority/watermark, CRTC timing, or DP link training.**
+
+The display register *definitions* live only in the 3D Register Reference
+PDFs (Evergreen, Cayman, CIK, SI) — bitfield layouts but no programming
+sequences. The only AMD doc with real display content is `AMD HDA Verbs.pdf`
+(HDMI audio infoframes), and that's only relevant to a future
+HDMI-infoframe implementation that would let us drop the conservative
+DVI-fallback added in Phase 1.5.
+
+The programming sequence for watermarks therefore comes from Linux's
+`radeon` driver (`evergreen_bandwidth_update`, `dce6_bandwidth_update`,
+`dce8_bandwidth_update`). Per the no-code-copying policy of this fork, we
+port the *algorithm*, not the source. Linux is referenced for grounding;
+register fields are sourced from the AMD 3D Register References.
+
+### Experiment 1 — forced PRIORITY_ALWAYS_ON
+
+First hypothesis: the MC arbiter wasn't prioritizing scanout DMA, so the
+display FIFO was under-running on bandwidth-tight modes. Linux's
+`evergreen_bandwidth_update` falls back to `PRIORITY_ALWAYS_ON` whenever
+its latency-hiding math fails, which was expected to happen at 4K@60.
+
+A `bandwidth.cpp` module was added with the activity-check + LB-split +
+forced-`PRIORITY_ALWAYS_ON` infrastructure, plus the relevant register
+defines (`DC_LB_MEMORY_SPLIT`, `PRIORITY_A/B_CNT`, `DPG_PIPE_*`) added to
+`evergreen_reg.h` / `ni_reg.h`.
+
+Result on the test card at 4K@60Hz: **no change.** Forced priority alone
+did not fix the corruption.
+
+### Experiment 2 — Linux register state captured at 4K@60Hz
+
+Booted Linux Mint 22.3 on the same hardware at 4K@60Hz, captured
+display-engine register state via a Python `mmap` script over the PCI BAR.
+Three findings stood out from comparing Linux's register state to Haiku's:
+
+| Reg | Linux at 4K@60 | Haiku at 4K@60 | Note |
+|-----|----------------|----------------|------|
+| `0x6804` GRPH_CONTROL `ARRAY_MODE` | `4` (2D_TILED_THIN1) | `1` (LINEAR_ALIGNED) | **architectural** |
+| `0x6810` GRPH_PRIMARY_SURFACE_ADDRESS | `0x1484a000` (deep into VM) | `0x00000000` (start of VRAM) | **architectural** |
+| `0x6820` GRPH_PITCH | `0x00000000` | `3840` (linear pitch in pixels) | **architectural** |
+| `0x0bf0/0x0bf4/0x0ca0` PIPE_ARBITRATION/LATENCY/DMIF | non-zero, real values | unprogrammed by Haiku | bandwidth |
+| `0x6cc8/0x6ccc` DPG_PIPE_* (DCE 5+) | `0` | written by Haiku | **wrong register family for Caicos!** |
+
+Two interesting facts emerged immediately:
+
+1. **Linux uses tiled scanout, Haiku uses linear.** The chip then computes
+   addresses from tile geometry, which is why Linux's `GRPH_PITCH` is zero.
+2. **Linux uses the DCE 4-style PIPE registers on Caicos**, not the
+   DCE 5+ DPG_PIPE registers. The original Phase 4 design (and the
+   Experiment 1 code) routed Caicos to DPG_PIPE based on `dceMajor >= 5`,
+   which was wrong — Caicos is architecturally DCE 4.x for bandwidth
+   purposes.
+
+### Experiment 3 — Linux's register values written verbatim
+
+Hardcoded Linux's exact captured values into `bandwidth.cpp` and routed
+them to the DCE 4 PIPE registers:
+
+```
+0x0bf0 = 0x00030002    PIPE_ARBITRATION_CONTROL3 (LATENCY_WATERMARK_MASK=3)
+0x0bf4 = 0x1d4d759a    PIPE_LATENCY_CONTROL (low=30106, high=7501)
+0x0ca0 = 0x00000011    PIPE_DMIF_BUFFER_CONTROL (1 buffer, COMPLETED)
+0x6b18 = 0x00100026    PRIORITY_A_CNT (ALWAYS_ON | mark=38)
+0x6b1c = 0x00100014    PRIORITY_B_CNT (ALWAYS_ON | mark=20)
+```
+
+Result on the test card at 4K@60Hz: **still corrupted.** Linux's exact
+priority and watermark values do not fix Haiku's 4K scanout.
+
+This is the decisive finding. **Bandwidth/priority is not the disease**;
+the watermark numbers Linux uses are tuned for tiled scanout's much
+better memory-access locality. Linear scanout is fundamentally unable to
+sustain 4K@60Hz on this card's 64-bit memory bus regardless of how the
+arbiter is biased.
+
+### Experiment 4 — 4K@30Hz with linear scanout
+
+Halving the pixel clock (4K@30 = ~297 MHz) halves the sustained read
+bandwidth. Tested via `screenmode 3840 2160 32 30`:
+
+- Static desktop: clean.
+- Window movement / motion: visible jitter and edge artifacts.
+- Same artifacts present on Linux Mint at 4K@60Hz on this monitor + cable.
+
+Static-clean confirms the bandwidth ceiling theory: linear scanout fits
+at 4K@30 but not at 4K@60. Motion-time artifacts appear to be a separate
+hardware-level signal-integrity issue (DisplayPort PHY at the edge of its
+envelope, or monitor scaler), since Linux exhibits the same.
+
+### Decision: pixel-clock cap on Caicos
+
+The fix that would make 4K@60Hz work on Caicos under Haiku is **tiled
+scanout**, which:
+
+- Allocates the framebuffer as a GPU buffer object in tile layout.
+- Requires app_server to write pixels via a tile-aware path, or for the
+  driver to install a translation layer between linear app_server writes
+  and tiled GPU memory.
+- Touches files outside the radeon_hd driver tree (app_server, possibly
+  shared graphics headers).
+
+The RadeonHD fork is distributed as a standalone `.hpkg` overlay against
+stock Haiku and explicitly does not modify code outside the driver tree.
+Tiled scanout is therefore **out of scope**.
+
+The shipped solution: cap pixel clock at **165 MHz** on `RADEON_CAICOS`
+in `is_mode_supported()`. This:
+
+- Allows 1080p@60Hz (148.5 MHz) and 1080p@75Hz (162 MHz) — the
+  empirically-validated working ceiling.
+- Rejects 1440p@60Hz (241 MHz), 4K@30Hz (297 MHz), and 4K@60Hz (533 /
+  594 MHz). The 4K@30 case is rejected too — its motion artifacts make
+  it not worth offering as the default highest mode.
+- Inherits the existing pixel-clock validation framework added in
+  Phase 1.1 (`is_mode_supported()` already filters on connector type and
+  pixel clock), so this is a single additional `if` block.
+
+```c
+if (info.chipsetID == RADEON_CAICOS
+    && mode->timing.pixel_clock > 165000) {
+    sane = false;
+}
+```
+
+The cap targets Caicos specifically because that's the only chip empirically
+validated against. Cayman and Turks (also Northern Islands) have wider
+memory buses and likely tolerate higher modes; they're left uncapped
+pending hardware testing. If those chips also exhibit 4K corruption, the
+cap can be extended via a chip-flag check.
+
+### What stayed in the codebase
+
+- The `EVERGREEN_DC_LB_MEMORY_SPLIT`, `EVERGREEN_PRIORITY_A/B_CNT`,
+  `EVERGREEN_PIPE0_*`, and `NI_DPG_PIPE_*` register defines added to
+  `evergreen_reg.h` and `ni_reg.h` during Experiments 1–3 are kept —
+  they're documented register addresses with bitfield breakdowns and
+  may be useful for future per-chip cap logic or signal-integrity
+  diagnostics.
+- The `bandwidth.cpp` / `bandwidth.h` files were removed; the forced-
+  priority approach didn't fix the disease and the LB-split logic was
+  written for a single-display test rig. If tiled scanout ever does land
+  in Haiku (driver-external work), the bandwidth math can be re-added.
+- The diagnostic register-readback `TRACE` block in `display_crtc_fb_set`
+  was removed; it served the investigation and is no longer load-bearing.
+
+---
+
+## Bug Tracker Cross-Reference
+
+| Bug # | Title | Fix(es) | Status |
+|-------|-------|---------|--------|
+| #8154 | Garbled display on iMac (HD 6750M) | 2.3 (spread spectrum) | Likely improved |
+| #8339 | HD 6450 hash in image | 2.3 (spread spectrum) | Likely improved |
+| #8485 | HD 6770 second display black | 2.5 (DPMS) + 2.6 (DP training) | Improved |
+| #10939 | Kabini display issues | 2.1 (VRAM) + 2.2 (CHIP_APU flags) | Resolved |
+| #17664 | Cedar app_server crash (0 MB framebuffer) | 2.1 (VRAM) + 2.3 (spread spectrum) | Resolved |
+| #18470 | Variant of #17664 | 2.1 (VRAM) | Resolved |
+
+### Notes
+
+- Bugs #8154 and #8339 involve display "hash" (noise / garbling). The
+  spread spectrum fix addresses one known cause, but those cards may also be
+  affected by framebuffer write issues not addressed here.
+- Bug #8485 (second DP display black) requires functional DisplayPort and
+  proper DPMS — fixes 2.5 and 2.6 address the software side, but
+  hardware-level DP support depends on the specific card's BIOS.
+- The Polaris PLL routing fix (2.4b) is a prerequisite for Polaris display
+  output to work *at all*.
+
+---
+
+## Files Modified — Complete List
+
+### Kernel Driver — `src/add-ons/kernel/drivers/graphics/radeon_hd/`
+
+| File | Phase 1 | Phase 2 | Description |
+|------|:-------:|:-------:|-------------|
+| `driver.cpp` | ✅ | ✅ | PCI ID table: Cedar corrections (Phase 1); Kaveri/Kabini/Mullins `CHIP_STD` → `CHIP_APU`, 58 entries (Phase 2) |
+| `radeon_hd.cpp` | — | ✅ | APU check inside the Tahiti+ VRAM-detection branch |
+
+### Accelerant — `src/add-ons/accelerants/radeon_hd/`
+
+| File | P1 | P1.5 | P2 | P3 | P4 | Description |
+|------|:--:|:----:|:--:|:--:|:--:|-------------|
+| `display.cpp` | ✅ | ✅ | ✅ | ✅ | — | HDMI encoder mode (P1, then P1.5 conservative DVI fallback); spread spectrum V2/V3 constants (P2); EDID range descriptor sanity (P3.1); forced linear `ARRAY_MODE` for Evergreen+ scanout (P3.2) |
+| `displayport.cpp` | — | — | ✅ | — | — | HBR2 enabled, link training return-value checks, retry-with-rate-fallback |
+| `encoder.cpp` | — | — | ✅ | — | — | eDP power on/off, DP receiver D3 sleep, Travis bridge quirk, IGP lane comment |
+| `gpu.cpp` | ✅ | — | — | — | — | Evergreen-specific MC halt/resume |
+| `gpu.h` | ✅ | — | — | — | — | Function declarations for the Evergreen path |
+| `mode.cpp` | ✅ | — | — | ✅ | ✅ | Pixel clock validation per connector type (P1); underflow-safe EDID range comparison + diagnostic TRACE (P3.1); Caicos pixel-clock cap at 165 MHz to keep linear scanout within memory-bandwidth envelope (P4) |
+| `pll.cpp` | — | — | ✅ | — | — | DCE 6.1 guard in `pll_pick()`, Polaris routing in `pll_external_init()`, SetPixelClock v1.7 fallback |
+
+### Headers — `headers/private/graphics/radeon_hd/`
+
+| File | Phase | Description |
+|------|:-----:|-------------|
+| `evergreen_reg.h` | 1, 3, 4 | New register defines for Evergreen MC sequencing (P1); `EVERGREEN_GRPH_ARRAY_MODE` macro and `LINEAR_GENERAL` / `LINEAR_ALIGNED` / `1D_TILED_THIN1` / `2D_TILED_THIN1` value constants (P3.2); display bandwidth / line-buffer / priority register defines documented for future use — `DC_LB_MEMORY_SPLIT`, `PRIORITY_A/B_CNT`, `PIPE0_*`, `MC_SHARED_CHMAP` (P4) |
+| `ni_reg.h` | 4 | DCE 5+ `DPG_PIPE_*` register defines (P4) |
+| `accelerant.h` | 1 | `evergreen_gpu_state` struct declaration |
+
+---
+
+## Reference: Linux Radeon Driver
+
+The Linux `radeon` kernel driver (DRM) was used as a reference. The goal of
+this fork is to develop **Haiku-first** — we may examine other drivers to
+understand things like register mapping and init sequences, but **no Linux
+code is copied directly**. License compatibility is irrelevant when no code
+crosses the boundary; that line is drawn explicitly to keep the fork clean.
+
+The fixes here align with Linux behavior in the following ways:
+
+| Area | Linux source of truth | What we mirrored |
+|------|------------------------|-------------------|
+| Pixel clock caps | `radeon_connector.c` | 165 MHz HDMI on pre-DCE6, 340 MHz on DCE6+ |
+| Evergreen MC programming | `evergreen.c` (`evergreen_mc_stop()` / `evergreen_mc_resume()`) | Register layout, double-buffer locking, 64-bit surface address pairs |
+| PCI ID `0x68fa` classification | Linux identifies as `CHIP_CEDAR` | Confirmed Haiku table was wrong; corrected |
+| Cedar PCI IDs | `radeon_pci_ids.h` | Added the seven missing IDs |
+| HDMI encoder mode policy | `radeon_audio.c` only requests `ATOM_ENCODER_MODE_HDMI` when audio is enabled | Phase 1.5 mirrors that conservative default |
+| Spread spectrum V2 vs V3 | AtomBIOS table-version dispatch | Use V2 constants on the V2 code path |
+| APU VRAM detection | `radeon_device.c` flags `CHIP_FAMILY_APU` and reads UMA allocation register | Same logic via Haiku's `CHIP_APU` flag |
+| Polaris SetDCEClock routing | DCE 11.2 uses the SetDCEClock table | Routed via `dceVersion >= 1102` |
+| eDP power-on / DP D3 sleep / Travis quirk | `radeon_dp_atombios.c`, `atombios_encoders.c` | Same sequence and ordering |
+| HBR2 / link training retry | `radeon_dp_auxch.c`, `atombios_dp.c` | Same rate-fallback ladder (540 → 270 → 162 MHz) |
+| Linear-aligned scanout `ARRAY_MODE` | `evergreen.c` `evergreen_grph_enable` always sets `ARRAY_MODE_LINEAR_ALIGNED` for scanout | Same: forced in `display_crtc_fb_set` (Phase 3.2) |
+| 4K-class scanout strategy | `evergreen.c` uses 2D-tiled BO scanout via TTM | Out of scope (architectural). This fork caps Caicos at 1080p instead (Phase 4) |
+
+[#8154]: https://dev.haiku-os.org/ticket/8154
+[#8339]: https://dev.haiku-os.org/ticket/8339
+[#8485]: https://dev.haiku-os.org/ticket/8485
+[#10939]: https://dev.haiku-os.org/ticket/10939
+[#17664]: https://dev.haiku-os.org/ticket/17664
+[#18470]: https://dev.haiku-os.org/ticket/18470
