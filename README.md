@@ -7,11 +7,10 @@
 
 This is an enhanced fork of the Haiku `radeon_hd` graphics driver with bug fixes for Evergreen, Northern Islands, Southern Islands, Sea Islands, Volcanic Islands, Vega, and Polaris GPUs.
 
+>[!NOTE]
 > This is **not** an official Haiku project. 
->
 > It is a fork of the in-tree 
 > `radeon_hd` driver, distributed as a standalone `.hpkg` for users who want the fixes. 
->
 > There is no active plan to upstream these changes.
 
 ---
