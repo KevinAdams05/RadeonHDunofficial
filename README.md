@@ -138,23 +138,38 @@ the deep-dive on each fix.
 
 ## Installation
 
-> **Status:** the standalone `.hpkg` build is planned but not yet published.
-> Until then, the only way to use these fixes is to build a Haiku image with
-> them applied. See [Building from source](#building-from-source) below.
+### Standalone `.hpkg`
 
-### Standalone `.hpkg` (planned)
+Grab `radeon_hd_unofficial-<version>-x86_64.hpkg` from the
+[releases page](https://github.com/KevinAdams05/RadeonHDunofficial/releases),
+drop it in `~/config/packages/`, and reboot:
 
-Once published, the `.hpkg` will install to
-`~/config/non-packaged/add-ons/...` so that it overrides the stock driver
-without conflicting with the system package.
-
-```
-~/config/non-packaged/add-ons/kernel/drivers/bin/radeon_hd
-~/config/non-packaged/add-ons/kernel/drivers/dev/graphics/radeon_hd  → bin/
-~/config/non-packaged/add-ons/accelerants/radeon_hd.accelerant
+```sh
+cp radeon_hd_unofficial-*.hpkg ~/config/packages/
+shutdown -r
 ```
 
-Reboot after install. To revert, delete the files above and reboot.
+Haiku's packagefs union-mounts the package contents at:
+
+```
+~/config/add-ons/accelerants/radeon_hd.accelerant
+~/config/add-ons/kernel/drivers/bin/radeon_hd
+~/config/add-ons/kernel/drivers/dev/graphics/radeon_hd  → bin/
+```
+
+The kernel driver and accelerant loaders search user paths before system
+paths, so the fork's binaries are picked first at runtime. The stock
+`haiku` package's `radeon_hd` stays in place, untouched, at
+`/system/add-ons/...` — it just never gets reached. **No conflict with
+the haiku package, no `replaces` declaration, no destructive uninstall
+needed to undo.**
+
+To revert, remove the .hpkg and reboot:
+
+```sh
+rm ~/config/packages/radeon_hd_unofficial-*.hpkg
+shutdown -r
+```
 
 > **ABI lockstep — kernel driver and accelerant must match**
 >
@@ -167,25 +182,28 @@ Reboot after install. To revert, delete the files above and reboot.
 > **Always install both binaries together, both from this fork's `.hpkg`.**
 > Never mix the fork's accelerant with the stock kernel driver (or vice
 > versa) — the two sides would disagree on the struct layout and the
-> system will crash on first display setup. The `non-packaged` install
-> path overrides both binaries atomically, so this is automatic as long
-> as you don't hand-copy individual files.
+> system will crash on first display setup. The `.hpkg` ships both
+> binaries atomically, so this is automatic as long as you install via
+> the package and don't hand-copy individual files.
 
 ### Building from source
 
-These fixes currently live on the `KevinMain` branch of a personal Haiku fork.
-Apply the five commits below (or pull the branch) on top of `master`:
+End users don't need to build — install the .hpkg above. If you want to
+cut your own build (or contribute a fix), see
+[`docs/building-and-packaging.md`](docs/building-and-packaging.md) for
+the full overlay → jam → package workflow on a Linux build host.
+
+For reference, the committed fixes live on the `KevinMain` branch of
+[KevinAdams05/haiku](https://github.com/KevinAdams05/haiku):
 
 ```
 0dbe85ae56  radeon_hd: Fix garbled display on Cedar/Evergreen HDMI
 0d8df24306  radeon_hd: Fix APU VRAM detection, spread spectrum, PLL routing, DPMS, and DP link training
 2f542cc5ed  radeon_hd: drive HDMI connectors as DVI until infoframes are implemented
 2450f6b833  radeon_hd: harden EDID range parser and force linear scanout
-(pending)   radeon_hd: cap Caicos pixel clock at 165 MHz (linear-scanout bandwidth limit)
+182601b3c9  radeon_hd: cap Caicos pixel clock at 165 MHz for linear scanout
+bf2709f8d4  radeon_hd: add Kevin Adams to copyright + authors on touched files
 ```
-
-Then build a normal Haiku image (`jam -j8 @nightly-anyboot` or similar) and
-install as you would any Haiku build.
 
 ---
 
