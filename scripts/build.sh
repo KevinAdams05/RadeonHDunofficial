@@ -65,7 +65,7 @@ echo "==> Extracting binaries to $OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 ACCELERANT_OUT="$GENERATED/objects/haiku/$ARCH/release/add-ons/accelerants/radeon_hd/radeon_hd.accelerant"
-KERNEL_OUT="$GENERATED/objects/haiku/$ARCH/release/add-ons/kernel/drivers/bin/radeon_hd"
+KERNEL_OUT="$GENERATED/objects/haiku/$ARCH/release/add-ons/kernel/drivers/graphics/radeon_hd/radeon_hd"
 
 if [ ! -f "$ACCELERANT_OUT" ]; then
 	echo "ERROR: accelerant binary not found at $ACCELERANT_OUT" >&2
