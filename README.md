@@ -19,18 +19,30 @@ Release history and what changed in each version: see [`CHANGELOG.md`](CHANGELOG
 
 ## Tested Hardware
 
-Tested on Haiku hrev59697
-
-This driver was physically tested on the following cards:
+Tested on Haiku hrev59697.
 
 **Legend:** ✅ Pass &middot; ❌ Fail &middot; 🟡 In Progress &middot; ⬜ Not Yet Tested &middot; ➖ Output not present on this card
 
-| Brand | Model | PCI ID | Family | Codename | VGA | DVI | HDMI | DP | Notes |
-|-------|-------|--------|--------|----------|:---:|:---:|:----:|:--:|-------|
-| PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | ⬜ | ➖ | ✅ | ⬜ | 1080p@60Hz on HDMI verified (HDMI connector driven as DVI per the 0.2.0 fallback). |
-| AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ | 1080p@60Hz on DP and DVI-D Single Link, cold-boot verified. Higher modes incl. 4K capped at 165 MHz due to memory-bandwidth limits. |
-| AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ⬜ | ✅ | ⬜ | ✅ | 1080p@60Hz on DVI-I and DisplayPort verified. 128-bit memory bus tolerates higher pixel clocks than Caicos's 64-bit (1680x1680 @ 240 MHz worked) but still not 4K@60. Capped at 250 MHz. |
+| Brand | Model | PCI ID | Family | Codename | VGA | DVI | HDMI | DP |
+|-------|-------|--------|--------|----------|:---:|:---:|:----:|:--:|
+| PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | ⬜ | ➖ | ✅ | ⬜ |
+| AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ |
+| AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ⬜ | ✅ | ⬜ | ✅ |
 
+### Notes
+
+- **AX5450 (Cedar)** — 1080p@60Hz on HDMI verified. HDMI connector is
+  driven as DVI per the 0.2.0 fallback until the magenta-stripe
+  data-island bleed is fully solved.
+- **HD 7470 / 8470 (Caicos XT)** — 1080p@60Hz on DisplayPort and
+  DVI-D Single Link, cold-boot verified. Higher modes including
+  4K@60Hz are capped at 165 MHz pixel clock due to memory-bandwidth
+  limits of the linear-scanout path on this 64-bit-bus chip (see
+  0.4.0).
+- **HD 6570 / 7570 / 8550 / R5 230 (Turks PRO)** — 1080p@60Hz on DVI-I
+  and DisplayPort verified. The 128-bit memory bus tolerates higher
+  pixel clocks than Caicos's 64-bit (1680×1680 @ 240 MHz scans clean)
+  but still not 4K@60Hz. Capped at 250 MHz (see 0.5.0).
 
 ---
 
