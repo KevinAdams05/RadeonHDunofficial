@@ -24,6 +24,7 @@ This driver was physically tested on the following cards and outputs:
 |-------|-------|--------|--------|----------|----------------|--------|
 | PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | HDMI | Working (HDMI verified; VGA / DisplayPort not yet tested) |
 | AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | DisplayPort, DVI-D | Working at 1920&times;1080@60Hz on both outputs (DisplayPort verified, DVI-D Single Link verified, cold-boot verified). Higher modes (incl. 4K) capped on this chip due to memory-bandwidth limits of the linear-scanout path &mdash; see Phase 4. |
+| AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | DVI-I | Detected + boots clean at 1920&times;1080@60Hz over DVI-I. Higher-mode test pending; this chip has a 128-bit memory bus (2&times; Caicos's 64-bit) and is the natural in-between data point for the Phase 4 bandwidth ceiling. |
 
 
 ---
