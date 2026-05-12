@@ -19,9 +19,9 @@ Release history and what changed in each version: see [`CHANGELOG.md`](CHANGELOG
 
 ## Tested Hardware
 
-This driver was physically tested on the following cards. Per-output
-columns show what's been validated end-to-end; the Notes column
-captures resolution / cap / quirk findings.
+Tested on Haiku hrev59697
+
+This driver was physically tested on the following cards:
 
 **Legend:** ✅ Pass &middot; ❌ Fail &middot; 🟡 In Progress &middot; ⬜ Not Yet Tested &middot; ➖ Output not present on this card
 
@@ -67,7 +67,35 @@ PRs are welcome! However, please test all code changes on physical hardware befo
 
 
 ---
+## Installation
 
+### Standalone Package
+
+Grab `radeon_hd_unofficial-<version>-x86_64.hpkg` from the
+[releases page](https://github.com/KevinAdams05/RadeonHDunofficial/releases),
+drop it in `~/config/packages/`, and reboot:
+
+```sh
+cp radeon_hd_unofficial-*.hpkg ~/config/packages/
+shutdown -r
+```
+
+To revert, remove the .hpkg and reboot:
+
+```sh
+rm ~/config/packages/radeon_hd_unofficial-*.hpkg
+shutdown -r
+```
+
+## Building from source
+
+Building from the source is not required, you can install the .hpkg above. However if you want to
+cut your own build (or contribute a fix), see
+[`docs/building-and-packaging.md`](docs/building-and-packaging.md) for
+the full overlay → jam → package workflow on a Linux build host.
+
+
+---
 ## Fixes by Version
 
 One-line summary of each shipped release. For the prose summary of each
@@ -89,65 +117,23 @@ for the changelog-format release notes see
 
 ---
 
-## Installation
 
-### Standalone `.hpkg`
+### ABI lockstep — kernel driver and accelerant must match
 
-Grab `radeon_hd_unofficial-<version>-x86_64.hpkg` from the
-[releases page](https://github.com/KevinAdams05/RadeonHDunofficial/releases),
-drop it in `~/config/packages/`, and reboot:
+The kernel driver (`radeon_hd`) and the accelerant
+(`radeon_hd.accelerant`) share an in-memory `accelerant_info` struct via
+`clone_area`. This fork extends that struct (with `evergreen_gpu_state`
+for the Evergreen MC halt/resume path), so its layout differs from the
+stock Haiku build.
 
-```sh
-cp radeon_hd_unofficial-*.hpkg ~/config/packages/
-shutdown -r
-```
+Always install both binaries together, both from this fork's `.hpkg`.
+Never mix the fork's accelerant with the stock kernel driver (or vice
+versa) — the two sides would disagree on the struct layout and the
+system will crash on first display setup. 
 
-Haiku's packagefs union-mounts the package contents at:
-
-```
-~/config/add-ons/accelerants/radeon_hd.accelerant
-~/config/add-ons/kernel/drivers/bin/radeon_hd
-~/config/add-ons/kernel/drivers/dev/graphics/radeon_hd  → bin/
-```
-
-The kernel driver and accelerant loaders search user paths before system
-paths, so the fork's binaries are picked first at runtime. The stock
-`haiku` package's `radeon_hd` stays in place, untouched, at
-`/system/add-ons/...` — it just never gets reached. **No conflict with
-the haiku package, no `replaces` declaration, no destructive uninstall
-needed to undo.**
-
-To revert, remove the .hpkg and reboot:
-
-```sh
-rm ~/config/packages/radeon_hd_unofficial-*.hpkg
-shutdown -r
-```
-
-> **ABI lockstep — kernel driver and accelerant must match**
->
-> The kernel driver (`radeon_hd`) and the accelerant
-> (`radeon_hd.accelerant`) share an in-memory `accelerant_info` struct via
-> `clone_area`. This fork extends that struct (with `evergreen_gpu_state`
-> for the Evergreen MC halt/resume path), so its layout differs from the
-> stock Haiku build.
->
-> **Always install both binaries together, both from this fork's `.hpkg`.**
-> Never mix the fork's accelerant with the stock kernel driver (or vice
-> versa) — the two sides would disagree on the struct layout and the
-> system will crash on first display setup. The `.hpkg` ships both
-> binaries atomically, so this is automatic as long as you install via
-> the package and don't hand-copy individual files.
-
-### Building from source
-
-End users don't need to build — install the .hpkg above. If you want to
-cut your own build (or contribute a fix), see
-[`docs/building-and-packaging.md`](docs/building-and-packaging.md) for
-the full overlay → jam → package workflow on a Linux build host.
-
-For reference, the committed fixes live on the `KevinMain` branch of
-[KevinAdams05/haiku](https://github.com/KevinAdams05/haiku).
+**The `.hpkg` ships both
+binaries atomically**, so this is automatic as long as you install via
+the package and don't hand-copy individual files.
 
 ---
 

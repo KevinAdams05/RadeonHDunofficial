@@ -32,8 +32,10 @@ The output is a single `.hpkg` users drop into
 
 ## One-time setup on the build host
 
-The RadeonHD project's build server is `kevin@192.168.74.122` (a Linux
-VM); these notes assume a Linux box with similar setup. Adapt as needed.
+The RadeonHD project's build server is a Linux
+VM these notes assume a Linux box with similar setup. You can adapt as needed if you want to build on a Haiku box.
+
+There's also nothing wrong with building on the same machine you are testing on. That would make things more simple.
 
 ### Haiku source tree
 
