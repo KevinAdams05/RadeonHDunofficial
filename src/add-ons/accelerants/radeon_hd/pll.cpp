@@ -975,7 +975,15 @@ pll_set(display_mode* mode, uint8 crtcID)
 			args.v7.ucPpll = pll->id;
 			break;
 		default:
-			TRACE("%s: ERROR: table version %" B_PRIu8 ".%" B_PRIu8 " TODO\n",
+			// Hit an AtomBIOS SetPixelClock table version we don't handle.
+			// Supported minor versions in the switch above: 1, 2, 3, 5,
+			// 6, 7 (Polaris). 1.4 is intentionally absent (AMD skipped
+			// it in the BIOS table series). An unsupported version
+			// means newer silicon than we've seen — fail cleanly so the
+			// upper-level mode-set path surfaces a real error instead
+			// of silently programming bad PLL state.
+			ERROR("%s: unsupported SetPixelClock table version %"
+				B_PRIu8 ".%" B_PRIu8 " — PLL programming aborted\n",
 				__func__, tableMajor, tableMinor);
 			return B_ERROR;
 	}

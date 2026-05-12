@@ -27,6 +27,7 @@
 #include "display.h"
 #include "displayport.h"
 #include "encoder.h"
+#include "hdmi.h"
 #include "pll.h"
 #include "utility.h"
 
@@ -243,6 +244,14 @@ radeon_set_display_mode(display_mode* mode)
 	radeon_dpms_set(crtcID, B_DPMS_ON);
 	display_crtc_lock(crtcID, ATOM_DISABLE);
 	encoder_output_lock(false);
+
+	// NB: HDMI infoframe programming (hdmi.cpp / hdmi_avi_infoframe_program)
+	// was wired in here behind a VIDEO_CONNECTOR_HDMIA gate but does not
+	// currently suppress the magenta-stripe data-island bleed on Cedar.
+	// Disabled at the encoder-mode level instead (display_get_encoder_mode
+	// returns ATOM_ENCODER_MODE_DVI for HDMIA — the Phase 1.5 workaround).
+	// The infoframe machinery stays on disk for a future attempt once the
+	// missing Cedar-specific register or sequence is identified.
 
 	#ifdef TRACE_MODE
 	// for debugging

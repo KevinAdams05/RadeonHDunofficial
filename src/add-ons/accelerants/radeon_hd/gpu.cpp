@@ -6,7 +6,7 @@
  * Authors:
  *		Alexander von Gluck, kallisti5@unixzen.com
  *		Axel Dörfler, axeld@pinc-software.de
- *		Kevin Adams <kevinadams05@gmail.com>
+ *		Kevin Adams, kevinadams05@gmail.com
  */
 
 

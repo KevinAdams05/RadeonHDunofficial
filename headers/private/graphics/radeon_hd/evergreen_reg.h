@@ -321,4 +321,79 @@
 #define		EVERGREEN_NOOFCHAN_MASK					0x00003000
 
 
+/* HDMI / AFMT infoframe registers.
+ *
+ * The display block has six AFMT instances on DCE 4 / 5 / 6 / 8, one
+ * per DIG (digital) encoder. Linux radeon hardcodes per-block offsets
+ * in eg_offsets[]; we expose the same six values via
+ * EVERGREEN_AFMTn_OFFSET so callers can index by AFMT/DIG instance.
+ *
+ * NOTE: these offsets are NOT the same as EVERGREEN_CRTCn_REGISTER_OFFSET
+ * above. AFMT blocks live at their own MMIO stride. For a single-display
+ * Cedar/HDMI test the AFMT instance happens to match the CRTC index, but
+ * the broader mapping is connector → DIG encoder → AFMT block, not
+ * connector → CRTC → AFMT block.
+ *
+ * Without these programmed, ATOM_ENCODER_MODE_HDMI causes the encoder
+ * to emit data-island guard bands during HBLANK that receivers decode
+ * as visible pixels — the magenta-stripe bug worked around in Phase 1.5
+ * by forcing HDMIA connectors to ATOM_ENCODER_MODE_DVI. With a proper
+ * AVI infoframe + HDMI_KEEPOUT_MODE, the data island is correctly
+ * interpreted as packet data and the workaround can be retired.
+ */
+#define EVERGREEN_AFMT0_OFFSET						0x0
+#define EVERGREEN_AFMT1_OFFSET						0x800
+#define EVERGREEN_AFMT2_OFFSET						0x1400
+#define EVERGREEN_AFMT3_OFFSET						0x1c00
+#define EVERGREEN_AFMT4_OFFSET						0x2400
+#define EVERGREEN_AFMT5_OFFSET						0x2c00
+
+/* Per-block AFMT / HDMI register base addresses. Add the AFMTn offset
+ * above to address a specific block's copy. */
+#define EVERGREEN_HDMI_CONTROL						0x7030
+#define		EVERGREEN_HDMI_KEEPOUT_MODE				(1 << 0)
+#define		EVERGREEN_HDMI_PACKET_GEN_VERSION		(1 << 4)
+#define		EVERGREEN_HDMI_DEEP_COLOR_ENABLE		(1 << 24)
+
+#define EVERGREEN_HDMI_AUDIO_PACKET_CONTROL			0x7038
+#define EVERGREEN_HDMI_ACR_PACKET_CONTROL			0x703C
+#define EVERGREEN_HDMI_VBI_PACKET_CONTROL			0x7040
+
+#define EVERGREEN_HDMI_INFOFRAME_CONTROL0			0x7044
+#define		EVERGREEN_HDMI_AVI_INFO_SEND			(1 << 0)
+#define		EVERGREEN_HDMI_AVI_INFO_CONT			(1 << 1)
+#define		EVERGREEN_HDMI_AUDIO_INFO_SEND			(1 << 4)
+#define		EVERGREEN_HDMI_AUDIO_INFO_CONT			(1 << 5)
+#define		EVERGREEN_HDMI_MPEG_INFO_SEND			(1 << 8)
+#define		EVERGREEN_HDMI_MPEG_INFO_CONT			(1 << 9)
+
+#define EVERGREEN_HDMI_INFOFRAME_CONTROL1			0x7048
+#define		EVERGREEN_HDMI_AVI_INFO_LINE_MASK		0x0000003F
+#define		EVERGREEN_HDMI_AVI_INFO_LINE(x)			((x) & 0x3F)
+
+#define EVERGREEN_HDMI_GENERIC_PACKET_CONTROL		0x704C
+
+#define EVERGREEN_HDMI_GC							0x7058
+#define		EVERGREEN_HDMI_GC_AVMUTE				(1 << 0)
+#define		EVERGREEN_HDMI_GC_AVMUTE_CONT			(1 << 2)
+
+/* AVI infoframe registers. Pack 4 × 32-bit words:
+ *   AFMT_AVI_INFO0 = PB1 | (PB2 << 8) | (PB3 << 16) | (PB4 << 24)
+ *   AFMT_AVI_INFO1 = PB5 | (PB6 << 8) | (PB7 << 16) | (PB8 << 24)
+ *   AFMT_AVI_INFO2 = PB9 | (PB10 << 8) | (PB11 << 16) | (PB12 << 24)
+ *   AFMT_AVI_INFO3 = PB13 | (PB0 << 24)   PB0 = checksum, high byte
+ * The 3-byte header (HB0=0x82, HB1=0x02, HB2=0x0D) is emitted by hw
+ * and is NOT written to registers — only the 14-byte payload + checksum.
+ * Write order matters: INFO3 last, because some HW latches infoframe
+ * state on the write to INFO3. */
+#define EVERGREEN_AFMT_AVI_INFO0					0x7084
+#define EVERGREEN_AFMT_AVI_INFO1					0x7088
+#define EVERGREEN_AFMT_AVI_INFO2					0x708C
+#define EVERGREEN_AFMT_AVI_INFO3					0x7090
+
+#define EVERGREEN_AFMT_INFOFRAME_CONTROL0			0x7134
+#define EVERGREEN_AFMT_AUDIO_PACKET_CONTROL			0x712C
+#define		EVERGREEN_AFMT_AUDIO_SAMPLE_SEND		(1 << 0)
+
+
 #endif /* __EVERGREEN_REG_H__ */

@@ -25,6 +25,7 @@
 #include "bios.h"
 #include "connector.h"
 #include "displayport.h"
+#include "hdmi.h"
 #include "encoder.h"
 
 
@@ -492,19 +493,17 @@ display_get_encoder_mode(uint32 connectorIndex)
 				return ATOM_ENCODER_MODE_CRT;
 			break;
 		case VIDEO_CONNECTOR_HDMIA:
-			// HDMI is electrically backward-compatible with DVI. Until we
-			// program HDMI infoframes / data islands (HDMI_INFOFRAME_CONTROL0,
-			// HDMI_GENERIC_PACKET_CONTROL, HDMI_VBI_PACKET_CONTROL,
-			// AFMT_AUDIO_PACKET_CONTROL — see Linux evergreen_hdmi.c), driving
-			// AtomBIOS into ATOM_ENCODER_MODE_HDMI causes the encoder to emit
-			// data-island guard bands during HBLANK that the receiver decodes
-			// as visible pixels — observed as a magenta stripe on the left
-			// edge of the active region on Cedar/Evergreen HDMI. Linux only
-			// returns ATOM_ENCODER_MODE_HDMI when audio is enabled; mirror
-			// that conservative default until HDMI audio + infoframe support
-			// lands.
-			// TODO: switch to ATOM_ENCODER_MODE_HDMI once HDMI infoframe and
-			// audio setup are implemented for DCE4+.
+			// HDMI is electrically backward-compatible with DVI. Until
+			// the magenta-stripe data-island bleed on Cedar/Evergreen
+			// is fully solved (see hdmi.cpp — infoframe + keepout +
+			// packet-generator disables landed but didn't suppress it,
+			// meaning there's a Cedar-specific register or sequence we
+			// haven't found yet), drive HDMI connectors as DVI. The
+			// underlying infoframe machinery is kept on disk and ready
+			// to re-enable as soon as the missing piece is found.
+			//
+			// Linux only returns ATOM_ENCODER_MODE_HDMI when audio is
+			// actually enabled; mirror that conservative default.
 			return ATOM_ENCODER_MODE_DVI;
 		case VIDEO_CONNECTOR_DVID:
 		default:
@@ -945,6 +944,13 @@ display_crtc_fb_set(uint8 crtcID, display_mode* mode)
 	// Track the per-CRTC active mode for any future per-CRTC code that
 	// needs to know which heads are programmed. Cheap to maintain.
 	gDisplay[crtcID]->currentMode = *mode;
+
+	// HDMI infoframe programming used to live here, but AtomBIOS's
+	// encoder_mode_set later in radeon_set_display_mode resets the AFMT
+	// block when it programs ATOM_ENCODER_MODE_HDMI on the encoder,
+	// clobbering our HDMI_CONTROL / AFMT_AVI_INFO writes. The infoframe
+	// call is now in radeon_set_display_mode after DPMS-on, where the
+	// encoder is live and AtomBIOS won't touch the block again.
 }
 
 

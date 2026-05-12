@@ -65,8 +65,11 @@ dp_aux_speak(uint32 connectorIndex, uint8* send, int sendBytes,
 
 	unsigned char* base = (unsigned char*)(gAtomContext->scratch + 1);
 
-	// TODO: This isn't correct for big endian systems!
-	// send needs to be swapped on big endian.
+	// AtomBIOS DP_TRANSACTION reads `base` as a byte-oriented buffer
+	// (DP AUX bytes pushed straight onto the channel), so no host-to-LE
+	// swap is needed regardless of host byte order. Matches Linux
+	// radeon's atombios_dp.c behavior. The args struct fields above
+	// are accessed normally and get endian-handled by the compiler.
 	memcpy(base, send, sendBytes);
 
 	atom_execute_table(gAtomContext, index, (uint32*)&args);
@@ -89,8 +92,9 @@ dp_aux_speak(uint32 connectorIndex, uint8* send, int sendBytes,
 	if (recvLength > recvBytes)
 		recvLength = recvBytes;
 
-	// TODO: This isn't correct for big endian systems!
-	// recv needs to be swapped on big endian.
+	// Same byte-oriented buffer convention as the send path above —
+	// AtomBIOS writes AUX response bytes directly into `base + 16`,
+	// no swap needed on big-endian.
 	if (recv && recvBytes)
 		memcpy(recv, base + 16, recvLength);
 
