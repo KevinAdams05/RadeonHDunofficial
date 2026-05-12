@@ -27,7 +27,7 @@ captures resolution / cap / quirk findings.
 |-------|-------|--------|--------|----------|:---:|:---:|:----:|:--:|-------|
 | PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | ⬜ | ➖ | ✅ | ⬜ | 1080p@60Hz on HDMI verified. |
 | AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ | 1080p@60Hz on DP and DVI-D Single Link, cold-boot verified. Higher modes incl. 4K capped on this chip due to memory-bandwidth limits of the linear-scanout path &mdash; see Phase 4. |
-| AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ⬜ | ✅ | ⬜ | ➖ | 1080p@60Hz on DVI-I verified. 128-bit memory bus (2&times; Caicos's 64-bit) &mdash; the natural in-between data point for the Phase 4 bandwidth ceiling; 4K test pending. |
+| AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ⬜ | ✅ | ⬜ | ✅ | 1080p@60Hz on DVI-I and DisplayPort verified. 4K@60Hz tested over DP &mdash; same severe stride-aliased corruption seen on Caicos. 128-bit memory bus tolerates higher pixel clocks than Caicos's 64-bit (1680x1680 @ 240 MHz worked) but still not 4K@60. Capped at 250 MHz in Phase 4. |
 
 
 ---

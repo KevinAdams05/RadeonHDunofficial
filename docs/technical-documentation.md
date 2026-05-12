@@ -1111,30 +1111,78 @@ The RadeonHD fork is distributed as a standalone `.hpkg` overlay against
 stock Haiku and explicitly does not modify code outside the driver tree.
 Tiled scanout is therefore **out of scope**.
 
-The shipped solution: cap pixel clock at **165 MHz** on `RADEON_CAICOS`
-in `is_mode_supported()`. This:
+The shipped solution: per-chip pixel-clock caps in `is_mode_supported()`,
+each picked as the highest pixel clock validated as clean on real
+hardware. Initially Caicos-only; extended to Turks after that card was
+acquired and tested.
 
-- Allows 1080p@60Hz (148.5 MHz) and 1080p@75Hz (162 MHz) — the
-  empirically-validated working ceiling.
-- Rejects 1440p@60Hz (241 MHz), 4K@30Hz (297 MHz), and 4K@60Hz (533 /
-  594 MHz). The 4K@30 case is rejected too — its motion artifacts make
-  it not worth offering as the default highest mode.
-- Inherits the existing pixel-clock validation framework added in
-  Phase 1.1 (`is_mode_supported()` already filters on connector type and
-  pixel clock), so this is a single additional `if` block.
+| Chip | Memory bus | Cap | Tops out around |
+|---|---|---|---|
+| `RADEON_CAICOS` | 64-bit | **165 MHz** | 1080p@75Hz |
+| `RADEON_TURKS` | 128-bit | **250 MHz** | 1680x1680@60Hz (highest tested clean) |
 
 ```c
-if (info.chipsetID == RADEON_CAICOS
-    && mode->timing.pixel_clock > 165000) {
+uint32 capKHz = 0;
+const char* capChipName = NULL;
+if (info.chipsetID == RADEON_CAICOS) {
+    capKHz = 165000;
+    capChipName = "Caicos";
+} else if (info.chipsetID == RADEON_TURKS) {
+    capKHz = 250000;
+    capChipName = "Turks";
+}
+if (capKHz != 0 && mode->timing.pixel_clock > capKHz) {
     sane = false;
 }
 ```
 
-The cap targets Caicos specifically because that's the only chip empirically
-validated against. Cayman and Turks (also Northern Islands) have wider
-memory buses and likely tolerate higher modes; they're left uncapped
-pending hardware testing. If those chips also exhibit 4K corruption, the
-cap can be extended via a chip-flag check.
+The cap is **per-chip** because the bandwidth ceiling scales with the
+memory bus width. Turks's 128-bit bus tolerates ~50% higher pixel clock
+than Caicos before scanout corrupts, but still not enough for 4K@60Hz
+(533 MHz). Cayman and Barts (also Northern Islands) have 256-bit buses
+and likely tolerate higher modes again; they're left uncapped pending
+hardware testing. If they also exhibit corruption at some mode, the
+cap can be extended via another `else if` clause.
+
+### Turks confirmation (added after Caicos cap shipped)
+
+Acquired an HD 6570/7570/8550/R5 230 OEM card (Turks PRO, PCI `1002:6759`)
+to probe whether the wider 128-bit memory bus would tolerate 4K@60Hz
+linear scanout where Caicos couldn't. Result: same severe stride-aliased
+corruption as Caicos. 1080p@60Hz (148 MHz) clean. 1680x1680@60Hz
+(240 MHz) clean. 4K@60Hz (533 MHz) broken. Cap added at 250 MHz with
+5 MHz headroom above the highest clean mode.
+
+This narrows the architectural finding: the bandwidth-ceiling story
+isn't just "low-end Caicos" — it's general to linear-scanout on
+narrow-bus Northern Islands. The Phase 4 cap framework now covers two
+chips and will likely extend to Turks-variant + Barts/Cayman if their
+linear-scanout behavior at higher pixel clocks turns out to be similar.
+
+### Square synthesized modes filter
+
+A side observation from the Turks test: with the per-chip cap allowing
+modes up to its threshold, the boot mode-picker (Haiku app_server)
+picked **1680x1680** as the highest valid mode on a 16:9 monitor —
+because pure pixel-count ordering ranked it above 1920x1080. That
+1:1 mode came out of Haiku's shared `create_display_modes()` helper
+when an EDID Standard Timing Identifier's aspect-ratio bits decoded to
+"unknown" and the parser fell through to width-equals-height. No real
+consumer monitor advertises native 1280x1280 / 1440x1440 / 1680x1680
+timings.
+
+To prevent users from getting a square mode on their 16:9 panel by
+default, `is_mode_supported()` now also rejects any mode where
+`virtual_width == virtual_height` and width > 1024. The threshold
+preserves any genuinely 1:1 displays (industrial / kiosk panels at
+1024x1024 or below would still pass — though none exist in the
+Haiku-synthesized mode list anyway). For the Turks card, this rejects
+1280x1280, 1440x1440, and 1680x1680, so boot falls back to a clean
+1920x1080@60Hz.
+
+The filter is generic and applies to every chip, not just Caicos/Turks
+— the square-mode synthesizer artifact is a Haiku-framework bug that
+affects all radeon_hd-driven cards.
 
 ### What stayed in the codebase
 

@@ -342,6 +342,23 @@ is_mode_supported(display_mode* mode)
 	if (is_mode_sane(mode) != B_OK)
 		sane = false;
 
+	// Reject 1:1 (square) synthesized modes. These come out of Haiku's
+	// shared accelerant helper create_display_modes() when an EDID
+	// Standard Timing Identifier's aspect-ratio bits decode to "unknown"
+	// and the parser falls through to width-equals-height. No real
+	// consumer monitor advertises native 1280x1280 / 1440x1440 /
+	// 1680x1680 timings; offering them in the candidate list just lets
+	// the default-mode picker pick a square mode on a 16:9 panel by
+	// pure pixel-count tiebreak.
+	if (mode->virtual_width == mode->virtual_height
+		&& mode->virtual_width > 1024) {
+		TRACE("%s: rejecting square synthesized mode %" B_PRIu32
+			"x%" B_PRIu32 " (likely create_display_modes aspect-ratio "
+			"fallthrough)\n", __func__, mode->virtual_width,
+			mode->virtual_height);
+		sane = false;
+	}
+
 	// TODO: is_mode_supported on *which* display?
 	uint32 crtid = 0;
 
@@ -389,12 +406,11 @@ is_mode_supported(display_mode* mode)
 	//
 	// Haiku writes pixels into the framebuffer through the PCI BAR as a
 	// linear surface and programs the chip with ARRAY_MODE_LINEAR_ALIGNED
-	// (see Phase 3.2 / display_crtc_fb_set). On low-end Northern Islands
-	// silicon with a 64-bit memory bus (Caicos / Caicos XT — HD 6450 /
-	// HD 7470 / HD 8470 / R5 230/235/310 OEM) this works cleanly up to
-	// ~1080p@60Hz but cannot sustain the bandwidth required for higher
-	// pixel clocks. Symptoms above the cap range from minor edge jitter
-	// (4K@30Hz) to severe stride-aliased corruption (4K@60Hz).
+	// (see Phase 3.2 / display_crtc_fb_set). On lower-end Northern Islands
+	// silicon the memory bus is too narrow to sustain the read bandwidth
+	// linear scanout needs at high pixel clocks. Symptoms above the cap
+	// range from minor edge jitter (4K@30Hz) to severe stride-aliased
+	// corruption (4K@60Hz).
 	//
 	// Linux's radeon driver works around this by using tiled scanout
 	// (ARRAY_MODE = 2D_TILED_THIN1), which has dramatically better
@@ -403,16 +419,32 @@ is_mode_supported(display_mode* mode)
 	// outside the radeon_hd driver and is therefore out of scope for this
 	// fork (which is distributed as a standalone .hpkg overlay).
 	//
-	// Cap pixel clock at 165 MHz on Caicos so the offered mode list tops
-	// out at 1080p@60Hz / 1080p@75Hz. Any higher mode is rejected before
-	// it reaches the PLL/encoder programming path. See Phase 4 in the
-	// RadeonHD technical documentation for the full investigation.
-	if (info.chipsetID == RADEON_CAICOS
-		&& mode->timing.pixel_clock > 165000) {
-		TRACE("%s: rejecting %" B_PRIu32 "x%" B_PRIu32 " on Caicos "
-			"(pixel clock %" B_PRIu32 " kHz exceeds 165 MHz linear-"
-			"scanout cap)\n", __func__, mode->virtual_width,
-			mode->virtual_height, mode->timing.pixel_clock);
+	// Caps are per-chip and empirical — picked as the highest pixel clock
+	// validated as clean on real hardware:
+	//
+	//   Caicos (64-bit bus)   165 MHz   tops out around 1080p@75Hz
+	//   Turks  (128-bit bus)  250 MHz   tops out around 1680x1680@60Hz
+	//                                   (verified clean at 240261 kHz;
+	//                                   cap set with 5 MHz headroom)
+	//
+	// Anything above these is rejected before it reaches the PLL/encoder
+	// programming path. See Phase 4 in the RadeonHD technical
+	// documentation for the full investigation.
+	uint32 capKHz = 0;
+	const char* capChipName = NULL;
+	if (info.chipsetID == RADEON_CAICOS) {
+		capKHz = 165000;
+		capChipName = "Caicos";
+	} else if (info.chipsetID == RADEON_TURKS) {
+		capKHz = 250000;
+		capChipName = "Turks";
+	}
+	if (capKHz != 0 && mode->timing.pixel_clock > capKHz) {
+		TRACE("%s: rejecting %" B_PRIu32 "x%" B_PRIu32 " on %s "
+			"(pixel clock %" B_PRIu32 " kHz exceeds %" B_PRIu32
+			" MHz linear-scanout cap)\n", __func__,
+			mode->virtual_width, mode->virtual_height, capChipName,
+			mode->timing.pixel_clock, capKHz / 1000);
 		sane = false;
 	}
 
