@@ -13,6 +13,22 @@ experiments, and Linux references — see
 
 ---
 
+## [0.6.1] — 2026-05-27
+
+### Added
+
+- **Radeon HD 6850 (Barts PRO, `0x6739`) re-enabled** in the supported
+  device table (`driver.cpp:280-281`). The entry had been wrapped in
+  `#if 0` carrying a "Not working: #8765" comment from a 14-year-old
+  Haiku Trac ticket against hrev44378 (black on DVI, vertical stripes
+  on VGA-via-DVI-converter). Driver code has evolved enormously
+  since; modern code initializes the card cleanly. Verified on a
+  Barts PRO card at 1080p@60Hz on DVI-I, cold-boot. HDMI, DP, and
+  the second DVI-I have not yet been tested. See README tested-hardware
+  table for the full row.
+
+---
+
 ## [0.6.0] — 2026-05-12
 
 ### Added

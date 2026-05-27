@@ -28,6 +28,7 @@ Tested on Haiku hrev59697.
 | PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | ⬜ | ➖ | ✅ | ⬜ |
 | AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ |
 | AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ⬜ | ✅ | ⬜ | ✅ |
+| Unknown | Radeon HD 6850 | `0x6739` | Northern Islands | Barts PRO | ⬜ | ✅ | ⬜ | ⬜ |
 
 ### Notes
 
@@ -43,6 +44,17 @@ Tested on Haiku hrev59697.
   and DisplayPort verified. The 128-bit memory bus tolerates higher
   pixel clocks than Caicos's 64-bit (1680×1680 @ 240 MHz scans clean)
   but still not 4K@60Hz. Capped at 250 MHz (see 0.5.0).
+- **HD 6850 (Barts PRO)** — 1080p@60Hz on DVI-I verified cold-boot.
+  This card was previously gated out of the driver entirely via an
+  `#if 0` block in `driver.cpp` carrying a stale "Not working: #8765"
+  comment from Haiku Trac ticket [#8765][8765] (filed 14 years ago
+  against hrev44378 — black on DVI, vertical stripes on VGA). The
+  block was removed in 0.6.1; modern driver code initializes the card
+  cleanly. Card reports 1 GB VRAM, 5 connectors enumerated
+  (DisplayPort, HDMI A, DVI-I dual, DVI-D), idle thermal ~34°C. HDMI,
+  DP, and the second DVI-I have not yet been tested.
+
+[8765]: https://dev.haiku-os.org/ticket/8765
 
 ---
 

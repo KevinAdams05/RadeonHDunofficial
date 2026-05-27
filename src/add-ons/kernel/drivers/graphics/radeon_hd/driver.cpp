@@ -277,10 +277,8 @@ const struct supported_device {
 #endif
 	//  Barts
 	{0x673e, 5, 0, RADEON_BARTS, CHIP_STD, "Radeon HD 6790"},
-#if 0
-	// Not working: #8765
+	// Re-enabled 2026-05-27 for HD 6850 retest; original block was Haiku #8765 from 2012 (stale).
 	{0x6739, 5, 0, RADEON_BARTS, CHIP_STD, "Radeon HD 6850"},
-#endif
 	{0x6738, 5, 0, RADEON_BARTS, CHIP_STD, "Radeon HD 6870"},
 	//  Cayman
 	{0x6700, 5, 0, RADEON_CAYMAN, CHIP_STD, "Radeon HD Cayman"},
