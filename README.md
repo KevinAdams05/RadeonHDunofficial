@@ -28,7 +28,7 @@ Tested on Haiku hrev59697.
 | PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | ⬜ | ➖ | ✅ | ⬜ |
 | AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ |
 | AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ⬜ | ✅ | ⬜ | ✅ |
-| Unknown | Radeon HD 6850 | `0x6739` | Northern Islands | Barts PRO | ⬜ | ✅ | ⬜ | ⬜ |
+| Sapphire | Radeon HD 6850 | `0x6739` | Northern Islands | Barts PRO | ➖ | ✅ | ✅ | ✅ |
 
 ### Notes
 
@@ -44,15 +44,21 @@ Tested on Haiku hrev59697.
   and DisplayPort verified. The 128-bit memory bus tolerates higher
   pixel clocks than Caicos's 64-bit (1680×1680 @ 240 MHz scans clean)
   but still not 4K@60Hz. Capped at 250 MHz (see 0.5.0).
-- **HD 6850 (Barts PRO)** — 1080p@60Hz on DVI-I verified cold-boot.
-  This card was previously gated out of the driver entirely via an
-  `#if 0` block in `driver.cpp` carrying a stale "Not working: #8765"
-  comment from Haiku Trac ticket [#8765][8765] (filed 14 years ago
-  against hrev44378 — black on DVI, vertical stripes on VGA). The
-  block was removed in 0.6.1; modern driver code initializes the card
-  cleanly. Card reports 1 GB VRAM, 5 connectors enumerated
-  (DisplayPort, HDMI A, DVI-I dual, DVI-D), idle thermal ~34°C. HDMI,
-  DP, and the second DVI-I have not yet been tested.
+- **HD 6850 (Barts PRO)** — 1080p@60Hz verified cold-boot on DVI-I,
+  HDMI A, DisplayPort, and the second DVI-I port. This card was
+  previously gated out of the driver entirely via an `#if 0` block in
+  `driver.cpp` carrying a stale "Not working: #8765" comment from
+  Haiku Trac ticket [#8765][8765] (filed 14 years ago against
+  hrev44378 — black on DVI, vertical stripes on VGA). The block was
+  removed in 0.6.1; modern driver code initializes the card cleanly.
+  Card reports 1 GB VRAM, 5 connectors enumerated (DisplayPort, HDMI
+  A, DVI-I dual, DVI-D), idle thermal ~34°C. 4K@60Hz over DisplayPort
+  (533 MHz pixel clock) produced stride-aliased scanout corruption —
+  same architectural ceiling as the narrower-bus Caicos and Turks
+  chips — and is now capped at 340 MHz in 0.6.2 (matching the card's
+  native HDMI 1.4a ceiling). Intermediate modes between 1080p and 4K
+  (e.g. 1440p@60Hz, 4K@30Hz) not yet tested — the test monitor's EDID
+  advertised only 1080p and 4K@60Hz on its detailed timings.
 
 [8765]: https://dev.haiku-os.org/ticket/8765
 
@@ -160,29 +166,6 @@ binaries atomically**, so this is automatic as long as you install via
 the package and don't hand-copy individual files.
 
 ---
-
-## Files Touched
-
-### Kernel driver — `src/add-ons/kernel/drivers/graphics/radeon_hd/`
-- `driver.cpp` — PCI ID corrections (Cedar), CHIP_APU flag corrections (58 entries)
-- `radeon_hd.cpp` — APU VRAM detection within Tahiti+ path
-
-### Accelerant — `src/add-ons/accelerants/radeon_hd/`
-- `display.cpp` — HDMI encoder mode, spread spectrum V2/V3 constants, forced linear `ARRAY_MODE` for Evergreen+ scanout (0.4.0), bogus EDID range descriptor rejection (0.4.0)
-- `displayport.cpp` — HBR2 enabled, link training retry with rate fallback; speculative big-endian TODO comments clarified (0.6.0)
-- `encoder.cpp` — eDP power on/off, DP receiver D3 sleep, Travis bridge quirk
-- `gpu.cpp`, `gpu.h` — Evergreen-specific MC halt/resume
-- `hdmi.cpp`, `hdmi.h` — AVI infoframe builder + AFMT register packing (0.6.0, currently dormant — call site disabled pending magenta-stripe investigation)
-- `mode.cpp` — pixel clock validation per connector; underflow-safe EDID range comparison + diagnostic TRACE (0.4.0); per-chip pixel-clock cap framework — Caicos at 165 MHz (0.4.0), Turks at 250 MHz (0.5.0); square-mode filter (0.5.0)
-- `pll.cpp` — DCE 6.1 guard, Polaris routing, SetPixelClock v1.7 fallback; unsupported-table-version log clarified (0.6.0)
-
-### Headers — `headers/private/graphics/radeon_hd/`
-- `evergreen_reg.h` — new register defines for Evergreen MC sequencing; `EVERGREEN_GRPH_ARRAY_MODE` macro and `LINEAR_GENERAL` / `LINEAR_ALIGNED` / `1D_TILED_THIN1` / `2D_TILED_THIN1` value constants (0.4.0); `DC_LB_MEMORY_SPLIT`, `PRIORITY_A/B_CNT`, `PIPE0_*`, `MC_SHARED_CHMAP` register defines kept as documentation for future per-chip cap logic (0.4.0); AFMT_AVI_INFO0..3 and HDMI_* register defines for the AVI infoframe path (0.6.0)
-- `ni_reg.h` — DCE 5+ `DPG_PIPE_*` register defines (0.4.0)
-- `accelerant.h` — `evergreen_gpu_state` struct
-
----
-
 
 ## Relationship to Upstream Haiku
 

@@ -113,3 +113,38 @@ Generalizes the per-chip cap framework and adds a second chip:
   log message. Was a bare `TODO`; now spells out which versions are
   supported (1.1, 1.2, 1.3, 1.5, 1.6, 1.7) and explains that 1.4 is
   intentionally absent (AMD skipped that table version).
+
+## 0.6.1 — HD 6850 (Barts) re-enabled
+
+- **Re-enabled `0x6739` (Radeon HD 6850, Barts PRO)** in `driver.cpp`'s
+  supported-device table. The entry had been gated behind an `#if 0`
+  block since 2012 with a "Not working: #8765" comment referencing
+  Haiku Trac ticket #8765 (filed against hrev44378 — reported black
+  screen on DVI, vertical white stripes on VGA-via-DVI-converter).
+  Driver code has evolved enormously over the intervening 14 years;
+  modern code initializes the card cleanly. Validated on a Sapphire
+  HD 6850 at 1080p@60Hz on DVI-I, cold-boot.
+
+## 0.6.2 — Barts pixel-clock cap
+
+- **Per-chip pixel-clock cap of 340 MHz added for Barts** in `mode.cpp`,
+  matching the existing Caicos (165 MHz) and Turks (250 MHz) caps. The
+  HD 6850 has a 256-bit memory bus — much wider than Caicos's 64-bit or
+  Turks's 128-bit — but linear scanout still produces stride-aliased
+  corruption at 4K@60Hz (533 MHz pixel clock) over DisplayPort. The
+  340 MHz cap matches the card's native HDMI 1.4a ceiling and allows
+  the realistic high-resolution modes (4K@30Hz at 267 MHz, 1440p@60Hz
+  at 241 MHz, 1080p@144Hz at 285 MHz, 3440×1440@60Hz at 319 MHz) while
+  rejecting 4K@60Hz cleanly before the corruption occurs. Cayman
+  remains uncapped pending hardware testing.
+- **Correction to Phase 4 narrative.** A cross-driver review found that
+  Linux's fbdev path also uses linear scanout (`fb_tiled = false`
+  hardcoded at `radeon_fbdev.c:63`); tiled scanout is a userspace-GEM
+  optimization, not the fbdev default. The architectural difference
+  that lets Linux's linear scanout sustain 4K@60Hz on Barts is the
+  display-watermark / line-buffer programming in
+  `evergreen_bandwidth_update` / `dce6_bandwidth_update`, not tiling.
+  Porting that algorithm with correct register-family targeting is
+  the path to lifting the cap and stays in-scope for this driver-only
+  fork (see also the prior `bandwidth.cpp` experiment notes in
+  technical-documentation.md).

@@ -435,6 +435,15 @@ is_mode_supported(display_mode* mode)
 	//   Turks  (128-bit bus)  250 MHz   tops out around 1680x1680@60Hz
 	//                                   (verified clean at 240261 kHz;
 	//                                   cap set with 5 MHz headroom)
+	//   Barts  (256-bit bus)  340 MHz   matches HDMI 1.4a native ceiling;
+	//                                   4K@60Hz (533 MHz on DP) confirmed
+	//                                   stride-aliased on HD 6850. Cap can
+	//                                   move up once intermediate modes
+	//                                   (4K@30, 1440p@60, 1080p@144) are
+	//                                   tested empirically.
+	//
+	// Cayman (256-bit bus, same DCE 5 generation as Barts) shares this
+	// scanout architecture but is left uncapped pending HW testing.
 	//
 	// Anything above these is rejected before it reaches the PLL/encoder
 	// programming path. See Phase 4 in the RadeonHD technical
@@ -447,6 +456,9 @@ is_mode_supported(display_mode* mode)
 	} else if (info.chipsetID == RADEON_TURKS) {
 		capKHz = 250000;
 		capChipName = "Turks";
+	} else if (info.chipsetID == RADEON_BARTS) {
+		capKHz = 340000;
+		capChipName = "Barts";
 	}
 	if (capKHz != 0 && mode->timing.pixel_clock > capKHz) {
 		TRACE("%s: rejecting %" B_PRIu32 "x%" B_PRIu32 " on %s "

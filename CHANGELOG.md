@@ -13,6 +13,42 @@ experiments, and Linux references — see
 
 ---
 
+## [0.6.2] — 2026-05-27
+
+### Added
+
+- **Barts pixel-clock cap of 340 MHz** in `mode.cpp`'s per-chip
+  linear-scanout cap framework, matching the existing Caicos
+  (0.4.0, 165 MHz) and Turks (0.5.0, 250 MHz) caps. Triggered by the
+  HD 6850 (Barts PRO) 0.6.1 bring-up: the wider 256-bit memory bus
+  raises the bandwidth ceiling but doesn't eliminate it — 4K@60Hz
+  over DisplayPort (533 MHz pixel clock) produces the same
+  stride-aliased scanout corruption seen on the narrower-bus
+  Caicos and Turks chips. The 340 MHz cap matches the card's native
+  HDMI 1.4a single-link TMDS ceiling, allows 4K@30Hz / 1440p@60Hz /
+  1080p@144Hz / 3440×1440@60Hz, and rejects 4K@60Hz cleanly before
+  the corruption occurs. Cayman remains uncapped pending hardware
+  testing.
+
+### Fixed
+
+- **Phase 4 narrative correction in
+  `docs/technical-documentation.md`.** Prior text framed Linux's
+  fix for high-pixel-clock linear scanout as "Linux uses 2D-tiled
+  scanout" — that's only true for userspace GEM clients. Linux's
+  fbdev path uses linear scanout same as Haiku
+  (`drivers/gpu/drm/radeon/radeon_fbdev.c:63` hardcodes
+  `fb_tiled = false`). The actual load-bearing fix on Linux is
+  **display-watermark / line-buffer programming** in
+  `evergreen_bandwidth_update` /  `dce6_bandwidth_update` /
+  `dce8_bandwidth_update`, which lives entirely inside the radeon
+  driver and is therefore in-scope for this driver-only fork. A
+  proper port (with corrected register-family targeting per the
+  Phase 4 register-comparison table) is the path to lifting the
+  per-chip caps. New 0.6.2 doc section added covering this.
+
+---
+
 ## [0.6.1] — 2026-05-27
 
 ### Added

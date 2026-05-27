@@ -18,9 +18,9 @@ separately in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Table of Contents
 
+- [Hardware Generations Affected](#hardware-generations-affected)
 - [Driver Architecture Recap](#driver-architecture-recap)
 - [Packaging Constraint — Kernel↔Accelerant ABI Lockstep](#packaging-constraint--kernelaccelerant-abi-lockstep)
-- [Hardware Generations Affected](#hardware-generations-affected)
 - [0.1.0 — Cedar / Evergreen HDMI Corruption](#010--cedar--evergreen-hdmi-corruption)
   - [Pixel Clock Validation Per Connector Type](#pixel-clock-validation-per-connector-type)
   - [Wrong Memory Controller Registers for Evergreen GPUs](#wrong-memory-controller-registers-for-evergreen-gpus)
@@ -40,6 +40,8 @@ separately in [`CHANGELOG.md`](../CHANGELOG.md).
   - [Caicos High-Bandwidth Mode Cap](#caicos-high-bandwidth-mode-cap)
 - [0.5.0 — Turks Cap and Square-Mode Filter](#050--turks-cap-and-square-mode-filter)
 - [0.6.0 — DP/PLL Polish and HDMI Infoframe Groundwork](#060--dppll-polish-and-hdmi-infoframe-groundwork)
+- [0.6.1 — HD 6850 (Barts) Re-enabled](#061--hd-6850-barts-re-enabled)
+- [0.6.2 — Barts Pixel-Clock Cap](#062--barts-pixel-clock-cap)
 - [Proposed: AtomBIOS Robustness](#proposed-atombios-robustness)
 - [Proposed: R600/R700 Hardening](#proposed-r600r700-hardening)
 - [Proposed: NI/Polaris Extensions](#proposed-nipolaris-extensions)
@@ -47,6 +49,137 @@ separately in [`CHANGELOG.md`](../CHANGELOG.md).
 - [Bug Tracker Cross-Reference](#bug-tracker-cross-reference)
 - [Files Modified — Complete List](#files-modified--complete-list)
 - [Reference: Linux Radeon Driver](#reference-linux-radeon-driver)
+
+---
+
+## Hardware Generations Affected
+
+| Generation | DCE | Codename Examples | Potential Test GPU | Potential Test CPU (APU) | Versions |
+|------------|-----|-------------------|--------------------|--------------------------|----------|
+| **R600** | 1.0 / 2.0 | R600, RV610, RV620, RV630, RV635, RV670, RS780/RS880 (IGP) | **NEED:** HD 2400 PRO **and** HD 3450 (direct match for [#11242] [#11907] [#19166]). Optional: HD 2600 (RV630, [#12970] [#12642]) | — | — |
+| **R700** | 3.0 / 3.2 | RV710, RV730, RV740, RV770 | **NEED:** HD 4670 (direct match for [#8457] [#15125]). Optional: HD 4350/4550 , HD 4870  | — | — |
+| Evergreen | 4.x | Cedar, Redwood, Juniper, Cypress | **✅ HD 5450 (`0x68f9`, Cedar).** NEXT: HD 5770 (Juniper) or HD 5870 (Cypress), HD 5670 (Redwood XT — to reproduce [#19934]) | — | 0.1.0, 0.2.0, 0.3.0, 0.4.0 |
+| Northern Islands | 5.x | Caicos, Turks, Barts, Cayman | **✅ HD 7470/8470 OEM (`0x6778`, Caicos XT).** **✅ HD 6570/7570/8550/R5 230 (`0x6759`, Turks PRO).** **✅ HD 6850 (`0x6739`, Barts PRO) — DVI-I, HDMI A, DP, 2nd DVI-I verified at ≤ 1080p (0.6.1 re-enabled, 0.6.2 capped at 340 MHz).** Need: HD 6950 (Cayman) | — | 0.3.0, 0.4.0 (Caicos cap), 0.5.0 (Turks cap), 0.6.1 (Barts re-enable), 0.6.2 (Barts cap) |
+| Southern Islands | 6.x | Cape Verde, Pitcairn, Tahiti, **Aruba (APU)** | HD 7770 (Cape Verde), HD 7870 (Pitcairn), or HD 7970 (Tahiti) | A10-5800K / A8-5600K (Trinity) **or** A10-6800K / A8-6600K (Richland) on Socket FM2  | 0.3.0, 0.4.0 |
+| Sea Islands | 8.x | Bonaire, Hawaii, **Kaveri/Kabini/Mullins (APU)** | R7 260X (Bonaire) or R9 290/290X (Hawaii) | A10-7860K / A10-7850K (Kaveri, Socket FM2+), Athlon 5350 / Sempron 3850 (Kabini, Socket AM1), or any Mullins laptop (e.g. A4 Micro-6400T) | 0.3.0, 0.4.0 |
+| Volcanic Islands | 10.0 / 11.0 / 11.1 | Tonga, Fiji, **Carrizo (APU)**, **Stoney (APU)** | R9 285 (Tonga), R9 Fury (Fiji) | Carrizo laptop: FX-8800P, A10-8700P, A8-8600P. Stoney laptop: A9-9410, A6-9220, E2-9000. | 0.3.0, 0.4.0 |
+| Polaris | 11.2 | Polaris10, Polaris11, Polaris12, Polaris22 | **RX 580** / RX 590 (Polaris10), RX 460 / RX 560 (Polaris11), or RX 540 / RX 550 (Polaris12) | — | 0.3.0, 0.4.0 |
+
+
+Barts (256-bit memory bus) was capped at 340 MHz in 0.6.2 after
+4K@60Hz over DisplayPort produced the same stride-aliased corruption
+seen on the narrower-bus Caicos and Turks chips — wider bus did not
+eliminate the architectural ceiling, only raised it. Cayman (also
+256-bit bus, same DCE 5 generation as Barts) shares the scanout
+architecture but is left uncapped pending hardware testing. See the
+0.4.0, 0.5.0, 0.6.1, and 0.6.2 sections for the full investigation.
+
+
+### Notes on choosing test cards
+
+- **Within a chip pair the bin doesn't matter for the driver.** HD 6850
+  vs HD 6870 are both `RADEON_BARTS` — same code path, same registers,
+  just different clock bin. Same for HD 6950 vs HD 6970 (both
+  `RADEON_CAYMAN`). Buy whichever is cheaper used.
+- **Look for DisplayPort-equipped cards** when targeting 4K-class tests.
+  Barts and Cayman launched with DP 1.2 (HBR2 5.4 Gbps) which is
+  sufficient for 4K@60Hz at the link layer. The DVI/HDMI outputs on
+  these cards are limited to HDMI 1.4a (4K@30Hz max), which would
+  defeat the bandwidth-ceiling test.
+
+Bold entries are integrated GPUs (APUs) sharing system RAM via UMA — these
+are particularly impacted by the VRAM-detection and chip-flag fixes in
+0.3.0.
+
+## What cards are in scope
+
+Cards considered in scope are the DCE family of cards which is roughly R600 (HD 2900) through Polaris12 (RX 540 / 550). See the **PCI ID Quick-Reference** list below.
+
+The fork stops at **Polaris (DCE 11.2, 2016–17)**. Anything newer uses
+AMD's **DCN** (Display Core Next) display engine, which bypasses
+AtomBIOS entirely and would require a separate Haiku driver
+(`radeon_dcn` or similar) to support. See
+[`dce-vs-dcn-driver-boundaries.md`](dce-vs-dcn-driver-boundaries.md)
+for the full architectural argument.
+
+### PCI ID Quick-Reference
+
+
+| Codename | Card / CPU | PCI ID range |
+|----------|------------|--------------|
+| R600 | HD 2900 | `0x9400`–`0x940F` |
+| RV610 | HD 2400 PRO/XT | `0x94C0`–`0x94CF` |
+| RV630 | HD 2600 PRO/XT | `0x9580`–`0x958F` |
+| RV620 | HD 3450 / 3470 | `0x95C0`–`0x95CF` |
+| RV635 | HD 3650 / 3690 | `0x9590`–`0x959F` |
+| RV670 | HD 3850 / 3870 | `0x9500`–`0x950F` |
+| RS780/RS880 | HD 3200 / 4250 / 4290 (IGPs) | `0x9610`–`0x963F`, `0x9710`–`0x971F` |
+| RV710 | HD 4350 / 4550 | `0x954F`, `0x9540`, `0x9555` |
+| RV730 | HD 4650 / 4670 | `0x9498`–`0x949F` |
+| RV740 | HD 4750 / 4770 | `0x94A0`, `0x94A1`, `0x94B3`–`0x94B5` |
+| RV770 | HD 4850 / 4870 | `0x9440`–`0x9462` |
+| Cedar | HD 5450 / 6350 / 7350 | `0x68E0`–`0x68FF` (esp. `0x68F9`, `0x68FA`) |
+| Redwood | HD 5670 / 5570 | `0x68C0`–`0x68DF` |
+| Juniper | HD 5750 / 5770 | `0x68B0`–`0x68BF` |
+| Cypress | HD 5850 / 5870 | `0x6898`–`0x68A8` |
+| Caicos | HD 7470 / 8470 OEM | `0x6760`–`0x677F` (esp. `0x6778`) |
+| Turks | HD 6570 / 6670 | `0x6740`–`0x675F` |
+| Barts | HD 6850 / 6870 | `0x6738`–`0x673F` |
+| Cayman | HD 6950 / 6970 | `0x6718`–`0x6720` |
+| Cape Verde | HD 7750 / 7770 | `0x6820`–`0x683F` |
+| Pitcairn | HD 7850 / 7870 | `0x6800`–`0x681F` |
+| Tahiti | HD 7950 / 7970 | `0x6798`–`0x679E` |
+| Aruba | A10-5800K / 6800K APU | `0x9900`–`0x9907` |
+| Bonaire | R7 260 / 260X | `0x6650`–`0x665F` |
+| Hawaii | R9 290 / 290X | `0x67A0`–`0x67BF` |
+| Tonga | R9 285 / 380 | `0x6920`–`0x6939` |
+| Fiji | R9 Fury / Nano | `0x7300`–`0x730F` |
+| Kaveri | A10-7850K / 7860K APU | `0x1304`–`0x131D` |
+| Kabini | Athlon 5350 APU | `0x9830`–`0x983D` |
+| Mullins | A4 Micro-6400T APU | `0x9850`–`0x9877` |
+| Carrizo | FX-8800P / A10-8700P APU | `0x9874` |
+| Stoney | A9-9410 / A6-9220 APU | `0x98E4` |
+| Polaris10 | RX 470 / 480 / 570 / 580 / 590 | `0x67C0`–`0x67FF` |
+| Polaris11 | RX 460 / 560 | `0x67E0`–`0x67EF` (within the P10 range) |
+| Polaris12 | RX 540 / 550 | `0x6980`–`0x699F` |
+
+
+### Out of scope cards
+For reference, **NOT in scope for `radeon_hd`** — these IDs should belong to a future `radeon_dcn` driver:
+
+| Codename | Card / CPU | PCI ID range | Display engine |
+|----------|------------|--------------|----------------|
+| Vega10 | RX Vega 56 / 64 | `0x6860`–`0x687F` | DCE 12.0 (late DCE, not practically supported) |
+| Raven / Raven2 | Ryzen 2200G / 2400G / 2x00U / 3x00U | `0x15D8`, `0x15DD`, `0x15D9` | **DCN 1.0** |
+| Picasso | Ryzen 3200G / 3400G refresh | `0x15D8` | **DCN 1.0** |
+| Navi10 | RX 5500 / 5600 / 5700 | `0x7310`–`0x731F` | **DCN 1.0** |
+| Renoir / Lucienne | Ryzen 4x00U / 5x00U mobile | `0x1636`–`0x164C` | **DCN 2.x** |
+| Navi2x | RX 6x00 series | `0x73A0`–`0x73FF` | **DCN 2.x** |
+| Navi3x | RX 7x00 series | `0x73DF`+ | **DCN 3.x** |
+
+If `listdev` shows one of these on a machine you're trying to support,
+the right answer is this fork won't help.
+
+
+| Generation | DCE/DCN | Codename Examples | Why excluded from this fork |
+|------------|---------|-------------------|------------------------------|
+| Vega (discrete) | DCE 12.0 | Vega10 (RX Vega 56/64) | Late-stage DCE that the existing radeon_hd code paths don't cover; the Vega10 register layout drifted significantly from Polaris. Technically in `radeon_hd`'s "DCE-era" bucket but not practically supportable here. |
+| Vega APU | DCN 1.0 | Raven Ridge (Ryzen 2200G/2400G), Picasso (Ryzen 3200G/3400G) | DCN-class display engine — needs a future `radeon_dcn` driver. The Vega-class GFX9 shaders share a name with discrete Vega but the **display engine is DCN**, not DCE. |
+| Vega APU (mobile) | DCN 1.0 | Ryzen 2x00U / 3x00U "Raven2" (HP ProBook 445 G6, ThinkPad E495, Acer Aspire 5 — see laptop note above) | Same chip family as desktop Raven; DCN. The laptops in the wifi-test note are useful for **wifi testing only**, not radeon_hd graphics testing. |
+| RDNA1 | DCN 1.0 | Navi10 (RX 5500/5600/5700) | DCN |
+| RDNA2 / Renoir | DCN 2.x | Renoir (Ryzen 4x00U/5x00U), Lucienne, Navi2x (RX 6x00) | DCN |
+| RDNA3 | DCN 3.x | Navi3x (RX 7x00) | DCN |
+
+### Out of scope cards tickets
+These Haiku tickets won't be resolved with this driver since they are related to out of scope cards (or APUs).
+
+- [#14800], [#17660] — Vega10 DCE 12.0
+- [#15044] — Vega M GH (Kaby Lake-G hybrid platform; AtomBIOS jmp loop with unknown register `mmDC_GPIO_HPD_A` — non-standard EMIB-coupled silicon)
+- [#16393], [#17525] — Picasso/Raven DCN APU
+- [#17377] — Navi10 RDNA1
+- [#17516] — Lucienne DCN APU
+- [#17939] — Renoir DCN APU
+
 
 ---
 
@@ -144,178 +277,6 @@ disruptive than the current rule (ship-both-together), because the
 struct is consumed in dozens of places across the accelerant. The
 ship-both rule costs nothing in practice — both binaries always travel
 together anyway — and avoids any change to the in-tree convention.
-
----
-
-## Hardware Generations Affected
-
-| Generation | DCE | Codename Examples | Potential Test GPU | Potential Test CPU (APU) | 0.1.0 | 0.2.0 | 0.3.0 | 0.4.0 | 0.5.0* | Proposed |
-|------------|-----|-------------------|--------------------|--------------------------|:--:|:----:|:--:|:--:|:--:|----------|
-| **R600** | 1.0 / 2.0 | R600, RV610, RV620, RV630, RV635, RV670, RS780/RS880 (IGP) | **NEED:** HD 2400 PRO **and** HD 3450 (direct match for [#11242] [#11907] [#19166]). Optional: HD 2600 (RV630, [#12970] [#12642]) | — | — | — | — | — | — | AtomBIOS robustness, R600/R700 hardening |
-| **R700** | 3.0 / 3.2 | RV710, RV730, RV740, RV770 | **NEED:** HD 4670 (direct match for [#8457] [#15125]). Optional: HD 4350/4550 , HD 4870  | — | — | — | — | — | — | AtomBIOS robustness, R600/R700 hardening |
-| Evergreen | 4.x | Cedar, Redwood, Juniper, Cypress | **✅ HD 5450 (`0x68f9`, Cedar).** NEXT: HD 5770 (Juniper) or HD 5870 (Cypress), HD 5670 (Redwood XT — to reproduce [#19934]) | — | ✅ | ✅ | ✅ | ✅ | — | AtomBIOS robustness |
-| Northern Islands | 5.x | Caicos, Turks, Barts, Cayman | **✅ HD 7470/8470 OEM (`0x6778`, Caicos XT).** **✅ HD 6570/7570/8550/R5 230 (`0x6759`, Turks PRO) — 1080p + 1680x1680 verified.** NEXT: HD 6850 (Barts), HD 6950 (Cayman) | — | — | — | ✅ | ✅ | ✅ (Caicos + Turks) | AtomBIOS robustness, NI/Polaris extensions |
-| Southern Islands | 6.x | Cape Verde, Pitcairn, Tahiti, **Aruba (APU)** | HD 7770 (Cape Verde), HD 7870 (Pitcairn), or HD 7970 (Tahiti) | A10-5800K / A8-5600K (Trinity) **or** A10-6800K / A8-6600K (Richland) on Socket FM2  | — | — | ✅ | ✅ | — | AtomBIOS robustness |
-| Sea Islands | 8.x | Bonaire, Hawaii, **Kaveri/Kabini/Mullins (APU)** | R7 260X (Bonaire) or R9 290/290X (Hawaii) | A10-7860K / A10-7850K (Kaveri, Socket FM2+), Athlon 5350 / Sempron 3850 (Kabini, Socket AM1), or any Mullins laptop (e.g. A4 Micro-6400T) | — | — | ✅ | ✅ | — | AtomBIOS robustness |
-| Volcanic Islands | 10.0 / 11.0 / 11.1 | Tonga, Fiji, **Carrizo (APU)**, **Stoney (APU)** | R9 285 (Tonga), R9 Fury (Fiji) | Carrizo laptop: FX-8800P, A10-8700P, A8-8600P. Stoney laptop: A9-9410, A6-9220, E2-9000. | — | — | ✅ | ✅ | — | AtomBIOS robustness, NI/Polaris extensions |
-| Polaris | 11.2 | Polaris10, Polaris11, Polaris12, Polaris22 | **RX 580** / RX 590 (Polaris10), RX 460 / RX 560 (Polaris11), or RX 540 / RX 550 (Polaris12) | — | — | — | ✅ | ✅ | — | AtomBIOS robustness, NI/Polaris extensions |
-
-\* 0.5.0 extends the per-chip pixel-clock cap framework (introduced as
-Caicos-only in 0.4.0) to also cover Turks. Adding more chips later is a
-single `else if` clause.
-
-**Proposed work column legend** (all proposed — see body sections):
-- **AtomBIOS robustness** — applies broadly to all radeon_hd-supported chips
-- **R600/R700 hardening** — targets the two oldest generations (only)
-- **NI/Polaris extensions** — hybrid muxing, ultrawide modeset, Stoney brightness, Caicos vsync
-- **`B_MOVE_DISPLAY` enhancement** — chip-agnostic accelerant API addition (not shown per-row)
-
-Other Northern Islands chips (Barts / Cayman) have wider memory buses
-and likely tolerate higher modes than the 64-bit Caicos or 128-bit
-Turks; they're left uncapped pending hardware testing. See the 0.4.0
-and 0.5.0 sections for the full investigation.
-
-### Note on laptops (wifi testing only — *not* `radeon_hd` targets)
-
-These laptops are useful for testing [#20025] wifi-driver work but are
-**not** valid `radeon_hd` test platforms — the Ryzen 2x00U / 3x00U
-"Raven" / "Raven2" mobile APUs use **DCN 1.0**, which is out of scope
-for this fork (see *Out of scope* subsection above).
-
-- HP ProBook 445 G6 — Ryzen 5 2500U or 3500U + Vega 8. Search HP ProBook 445 G6 Ryzen.
-- Lenovo ThinkPad E495 — Ryzen 5 3500U + Vega 8. Search ThinkPad E495 Ryzen 5.
-- Acer Aspire 5 A515-43 — Ryzen 3 3200U / 5 3500U + Vega 3/8. Cheapest tier, $60–120.
-
-*"Vega 8" / "Vega 3" in the marketing names refers to the GFX9 shader
-ISA, not the DCE-vs-DCN distinction; these chips' display engine is
-DCN.*
-
-### Notes on choosing test cards
-
-- **Within a chip pair the bin doesn't matter for the driver.** HD 6850
-  vs HD 6870 are both `RADEON_BARTS` — same code path, same registers,
-  just different clock bin. Same for HD 6950 vs HD 6970 (both
-  `RADEON_CAYMAN`). Buy whichever is cheaper used.
-- **Look for DisplayPort-equipped cards** when targeting 4K-class tests.
-  Barts and Cayman launched with DP 1.2 (HBR2 5.4 Gbps) which is
-  sufficient for 4K@60Hz at the link layer. The DVI/HDMI outputs on
-  these cards are limited to HDMI 1.4a (4K@30Hz max), which would
-  defeat the bandwidth-ceiling test.
-- **Turks (HD 6570 / HD 6670)** is the natural "in-between" data point
-  if the Caicos cap turns out to need extending: 128-bit memory bus
-  (~2× Caicos's 64-bit, ~½ Barts's 256-bit), DCE 5, separate
-  `RADEON_TURKS` enum and code path. Cheap on the used market and
-  worth picking up alongside any Barts/Cayman test card.
-
-Bold entries are integrated GPUs (APUs) sharing system RAM via UMA — these
-are particularly impacted by the VRAM-detection and chip-flag fixes in
-0.3.0.
-
-### Out of scope for `radeon_hd` — future `radeon_dcn` territory
-
-The fork stops at **Polaris (DCE 11.2, 2016–17)**. Anything newer uses
-AMD's **DCN** (Display Core Next) display engine, which bypasses
-AtomBIOS entirely and would require a separate Haiku driver
-(`radeon_dcn` or similar) to support. See
-[`dce-vs-dcn-driver-boundaries.md`](dce-vs-dcn-driver-boundaries.md)
-for the full architectural argument.
-
-| Generation | DCE/DCN | Codename Examples | Why excluded from this fork |
-|------------|---------|-------------------|------------------------------|
-| Vega (discrete) | DCE 12.0 | Vega10 (RX Vega 56/64) | Late-stage DCE that the existing radeon_hd code paths don't cover; the Vega10 register layout drifted significantly from Polaris. Technically in `radeon_hd`'s "DCE-era" bucket but not practically supportable here. |
-| Vega APU | DCN 1.0 | Raven Ridge (Ryzen 2200G/2400G), Picasso (Ryzen 3200G/3400G) | DCN-class display engine — needs a future `radeon_dcn` driver. The Vega-class GFX9 shaders share a name with discrete Vega but the **display engine is DCN**, not DCE. |
-| Vega APU (mobile) | DCN 1.0 | Ryzen 2x00U / 3x00U "Raven2" (HP ProBook 445 G6, ThinkPad E495, Acer Aspire 5 — see laptop note above) | Same chip family as desktop Raven; DCN. The laptops in the wifi-test note are useful for **wifi testing only**, not radeon_hd graphics testing. |
-| RDNA1 | DCN 1.0 | Navi10 (RX 5500/5600/5700) | DCN |
-| RDNA2 / Renoir | DCN 2.x | Renoir (Ryzen 4x00U/5x00U), Lucienne, Navi2x (RX 6x00) | DCN |
-| RDNA3 | DCN 3.x | Navi3x (RX 7x00) | DCN |
-
-These tickets in particular fall into this bucket and are tracked as
-out-of-scope:
-
-- [#14800], [#17660] — Vega10 DCE 12.0
-- [#15044] — Vega M GH (Kaby Lake-G hybrid platform; AtomBIOS jmp loop with unknown register `mmDC_GPIO_HPD_A` — non-standard EMIB-coupled silicon)
-- [#16393], [#17525] — Picasso/Raven DCN APU
-- [#17377] — Navi10 RDNA1
-- [#17516] — Lucienne DCN APU
-- [#17939] — Renoir DCN APU
-
-### Recommended Test Bench Combinations
-
-To minimize the number of physical machines needed, several generations
-can be exercised in a single box:
-
-| Build | Covers |
-|-------|--------|
-| Socket FM2 motherboard + A10-6800K (Richland) + HD 7870 (Pitcairn) | Southern Islands discrete *and* Aruba APU in one boot |
-| Socket FM2+ motherboard + A10-7860K (Kaveri) + R9 290 (Hawaii) | Sea Islands discrete *and* Sea Islands APU in one boot |
-| Socket AM4 motherboard + non-APU Ryzen + RX 580 (Polaris10) | Polaris (the AM4 platform's only `radeon_hd`-relevant target — note that Ryzen APUs (2200G/2400G/3200G/3400G) are **DCN, not DCE**, so their iGPU is *not* a `radeon_hd` test target. Pair the RX 580 with any Ryzen non-G CPU.) |
-| Carrizo or Stoney laptop | Volcanic Islands APU (the only practical way — VI APUs are BGA) |
-
-Two test rigs (one FM2/FM2+ tower, one AM4 tower) plus one Carrizo/Stoney
-laptop cover every 0.3.0 generation the fork patches. Existing hardware
-(the HD 5450, HD 7470/8470 OEM, and HD 6570/7570 OEM) already covers
-0.1.0, 0.2.0, and Northern Islands (0.4.0 + 0.5.0), which sit outside
-the combo plan above.
-
-### PCI ID Quick-Reference for Sourcing
-
-Useful when scanning eBay listings — sellers rarely list PCI IDs, but
-codename + model number is enough; confirm with the device on first
-boot via `listdev`:
-
-| Codename | Card / CPU | PCI ID range |
-|----------|------------|--------------|
-| R600 | HD 2900 | `0x9400`–`0x940F` |
-| RV610 | HD 2400 PRO/XT | `0x94C0`–`0x94CF` |
-| RV630 | HD 2600 PRO/XT | `0x9580`–`0x958F` |
-| RV620 | HD 3450 / 3470 | `0x95C0`–`0x95CF` |
-| RV635 | HD 3650 / 3690 | `0x9590`–`0x959F` |
-| RV670 | HD 3850 / 3870 | `0x9500`–`0x950F` |
-| RS780/RS880 | HD 3200 / 4250 / 4290 (IGPs) | `0x9610`–`0x963F`, `0x9710`–`0x971F` |
-| RV710 | HD 4350 / 4550 | `0x954F`, `0x9540`, `0x9555` |
-| RV730 | HD 4650 / 4670 | `0x9498`–`0x949F` |
-| RV740 | HD 4750 / 4770 | `0x94A0`, `0x94A1`, `0x94B3`–`0x94B5` |
-| RV770 | HD 4850 / 4870 | `0x9440`–`0x9462` |
-| Cedar | HD 5450 / 6350 / 7350 | `0x68E0`–`0x68FF` (esp. `0x68F9`, `0x68FA`) |
-| Redwood | HD 5670 / 5570 | `0x68C0`–`0x68DF` |
-| Juniper | HD 5750 / 5770 | `0x68B0`–`0x68BF` |
-| Cypress | HD 5850 / 5870 | `0x6898`–`0x68A8` |
-| Caicos | HD 7470 / 8470 OEM | `0x6760`–`0x677F` (esp. `0x6778`) |
-| Turks | HD 6570 / 6670 | `0x6740`–`0x675F` |
-| Barts | HD 6850 / 6870 | `0x6738`–`0x673F` |
-| Cayman | HD 6950 / 6970 | `0x6718`–`0x6720` |
-| Cape Verde | HD 7750 / 7770 | `0x6820`–`0x683F` |
-| Pitcairn | HD 7850 / 7870 | `0x6800`–`0x681F` |
-| Tahiti | HD 7950 / 7970 | `0x6798`–`0x679E` |
-| Aruba | A10-5800K / 6800K APU | `0x9900`–`0x9907` |
-| Bonaire | R7 260 / 260X | `0x6650`–`0x665F` |
-| Hawaii | R9 290 / 290X | `0x67A0`–`0x67BF` |
-| Tonga | R9 285 / 380 | `0x6920`–`0x6939` |
-| Fiji | R9 Fury / Nano | `0x7300`–`0x730F` |
-| Kaveri | A10-7850K / 7860K APU | `0x1304`–`0x131D` |
-| Kabini | Athlon 5350 APU | `0x9830`–`0x983D` |
-| Mullins | A4 Micro-6400T APU | `0x9850`–`0x9877` |
-| Carrizo | FX-8800P / A10-8700P APU | `0x9874` |
-| Stoney | A9-9410 / A6-9220 APU | `0x98E4` |
-| Polaris10 | RX 470 / 480 / 570 / 580 / 590 | `0x67C0`–`0x67FF` |
-| Polaris11 | RX 460 / 560 | `0x67E0`–`0x67EF` (within the P10 range) |
-| Polaris12 | RX 540 / 550 | `0x6980`–`0x699F` |
-
-For reference, **NOT in scope for `radeon_hd`** — these IDs belong to
-a future `radeon_dcn` driver:
-
-| Codename | Card / CPU | PCI ID range | Display engine |
-|----------|------------|--------------|----------------|
-| Vega10 | RX Vega 56 / 64 | `0x6860`–`0x687F` | DCE 12.0 (late DCE, not practically supported) |
-| Raven / Raven2 | Ryzen 2200G / 2400G / 2x00U / 3x00U | `0x15D8`, `0x15DD`, `0x15D9` | **DCN 1.0** |
-| Picasso | Ryzen 3200G / 3400G refresh | `0x15D8` | **DCN 1.0** |
-| Navi10 | RX 5500 / 5600 / 5700 | `0x7310`–`0x731F` | **DCN 1.0** |
-| Renoir / Lucienne | Ryzen 4x00U / 5x00U mobile | `0x1636`–`0x164C` | **DCN 2.x** |
-| Navi2x | RX 6x00 series | `0x73A0`–`0x73FF` | **DCN 2.x** |
-| Navi3x | RX 7x00 series | `0x73DF`+ | **DCN 3.x** |
-
-If `listdev` shows one of these on a machine you're trying to support,
-the right answer is "wait for `radeon_dcn`" — this fork won't help.
 
 ---
 
@@ -1350,6 +1311,185 @@ the next-session pickup checklist.
 
 ---
 
+## 0.6.1 — HD 6850 (Barts) Re-enabled
+
+**Date:** 2026-05-27.
+
+The HD 6850 entry (`0x6739`, Barts PRO) had been wrapped in `#if 0`
+inside `driver.cpp`'s `kSupportedDevices` table since circa 2012,
+carrying the comment `// Not working: #8765`. That comment references
+[Haiku Trac ticket #8765](https://dev.haiku-os.org/ticket/8765) — filed
+against `hrev44378` (early 2012) reporting:
+
+- Black screen when the HD 6850 drove a DVI Dell monitor (1680×1050).
+- Vertical white stripes on a VGA AOC monitor connected via a DVI→VGA
+  converter.
+
+Reporter `adamk` confirmed the issue persisted at `hrev44584` and again
+at `hrev45032` (with an HD 6950 also affected). `kallisti5` asked for a
+retest at `hrev45325` (mid-2012). No reply ever came back; the ticket
+sat open, the `#if 0` block sat in the source, and the chip went
+untested for 14 years.
+
+### Fix
+
+Remove the `#if 0` / `#endif` lines around `0x6739` so the entry
+becomes active in `kSupportedDevices`:
+
+```cpp
+// Before (driver.cpp:280-283):
+#if 0
+	// Not working: #8765
+	{0x6739, 5, 0, RADEON_BARTS, CHIP_STD, "Radeon HD 6850"},
+#endif
+
+// After:
+	// Re-enabled 2026-05-27 for HD 6850 retest;
+	// original block was Haiku #8765 from 2012 (stale).
+	{0x6739, 5, 0, RADEON_BARTS, CHIP_STD, "Radeon HD 6850"},
+```
+
+No other code changes were required to bring up the card. The
+`RADEON_BARTS` chip family was already wired through the existing
+Northern Islands code paths (used by HD 6790, HD 6870, etc.).
+
+### Verification
+
+On a Sapphire HD 6850 in the Supermicro X11SSH-LN4F test bench:
+
+- Driver claims the device cleanly: `init_driver: GPU(0) Radeon HD
+  6850, revision = 0x0` → `radeon_hd_init: card(0): Radeon Barts
+  1002:6739` → `init_registers, registers for ATI chipset Barts crt #0
+  loaded`.
+- Five connectors enumerated correctly: DisplayPort, HDMI A, two
+  DVI-I (digital + analog halves), DVI-D.
+- AtomBIOS table found and dumped, EDID readback successful on the
+  HDMI / DVI / DP probes that had monitors attached.
+- 1080p@60Hz mode set cleanly on DVI-I, HDMI A, and the second DVI-I.
+- 1 GB VRAM detected (256 MB mapped as framebuffer), idle thermal
+  ~34°C.
+
+### Lessons
+
+- Driver source carries dead defensive blocks indefinitely if nobody
+  notices and the comment doesn't say what to check. A 14-year-old
+  `#if 0` with a ticket reference is worth retesting on modern code
+  before assuming it's still valid — many of the underlying issues
+  may have been fixed by unrelated work since the gate went in.
+- The next defensive block worth re-investigating is the
+  `#if 0`-wrapped `{0x6850, 6, 0, RADEON_TURKS, ..., "Radeon HD 7570"}`
+  at `driver.cpp:274-277` (Haiku ticket #12026). Same pattern: stale
+  comment, untested in modern driver code, may now work.
+
+---
+
+## 0.6.2 — Barts Pixel-Clock Cap
+
+**Date:** 2026-05-27.
+
+### Symptom
+
+With 0.6.1 bringing up the HD 6850 cleanly at 1080p, the next test was
+4K@60Hz over DisplayPort. The driver successfully ran link training at
+HBR2 / 4 lanes (10.8+ Gbps, enough for 3840×2160@60Hz@32bpp), set the
+display mode at the chip level, and programmed the encoder. But the
+on-screen result was severe stride-aliased corruption — the same class
+of failure documented under the Caicos 4K@60Hz scanout investigation
+in 0.4.0 above, even on Barts's much wider 256-bit memory bus. (See
+the `bug-photo` discussions in the project memory.)
+
+### Cross-driver review (correction to Phase 4 narrative)
+
+Before adding a cap, the Linux / FreeBSD / OpenBSD / NetBSD radeon
+drivers were re-audited specifically for how *they* handle linear
+scanout at 4K on Barts. Result:
+
+| OS | Linear vs tiled fbdev scanout | Pixel-clock cap on NI? |
+|----|-------------------------------|------------------------|
+| Linux | **Linear** — `fb_tiled = false` hardcoded at `drivers/gpu/drm/radeon/radeon_fbdev.c:63` | None |
+| OpenBSD | **Linear** — same code, identical path | None |
+| NetBSD | Legacy `radeonfb`, predates Evergreen/NI | n/a |
+| FreeBSD | Linux DRM import; matches Linux | None |
+
+This is a **correction** to the framing in the 0.4.0 Caicos cap
+investigation above. The earlier narrative read as "Linux uses tiled
+scanout — the proper fix lives outside the radeon_hd driver." That's
+not quite right: tiled scanout *is* what Linux uses for *userspace
+GEM clients* (modern X11/Wayland compositors), but Linux's *fbdev*
+path — the closest analogue to Haiku's accelerant-driven framebuffer
+— uses **linear** scanout, same as us. What lets Linux's linear
+scanout sustain 4K@60Hz is the **display-watermark / line-buffer**
+programming in `evergreen_bandwidth_update`,
+`dce6_bandwidth_update`, and `dce8_bandwidth_update`. That code
+adaptively programs memory-controller display priority and
+line-buffer split based on resolution, pixel clock, and DRAM channel
+count. Haiku's driver has none of it. The Phase 4 `bandwidth.cpp`
+experiment in 0.4.0 was on the correct path but used the wrong
+register family for Caicos (DCE 5+ `DPG_PIPE` registers on a chip
+that Linux drives via DCE 4-style `PIPE` registers — see the register
+comparison table earlier in the 0.4.0 section).
+
+**Implication.** A proper port of `evergreen_bandwidth_update` /
+`dce6_bandwidth_update` with corrected register-family targeting is
+in-scope for this driver-only fork and is the path to lifting the
+per-chip caps entirely. That's a separate, larger effort for a future
+release.
+
+### Cap added
+
+Pending the watermark port, the Barts cap is the consistent ship-now
+workaround matching the existing 0.4.0 (Caicos, 165 MHz) and 0.5.0
+(Turks, 250 MHz) pattern. New entry in `mode.cpp`'s per-chip cap
+chain:
+
+```cpp
+} else if (info.chipsetID == RADEON_BARTS) {
+	capKHz = 340000;
+	capChipName = "Barts";
+}
+```
+
+### Why 340 MHz?
+
+The cap is set at the card's native HDMI 1.4a single-link TMDS ceiling.
+That value:
+
+- **Allows** 4K@30Hz (267 MHz), 1440p@60Hz (241 MHz), 1080p@144Hz
+  (285 MHz), 3440×1440@60Hz (319 MHz). All useful high-end modes.
+- **Rejects** 4K@60Hz (533 MHz) — the empirical failure point.
+- **Defensible default**: matches the card's native digital-output
+  signaling spec, so any mode the card was designed to drive over its
+  own HDMI link will pass the cap. Anything above is asking the
+  scanout path to do work the bandwidth model doesn't support.
+- **Tunable**: empirical hardware testing of intermediate modes
+  (4K@30Hz, 1440p@60Hz on a monitor that advertises them) can move
+  the cap up or down without changing the cap framework.
+
+### Cayman left uncapped
+
+Cayman shares Barts's scanout architecture (256-bit bus, DCE 5, same
+linear-scanout code paths) and likely needs the same cap, but is not
+tested. The doc tables continue to list Cayman as `NEXT:` test target.
+When a Cayman card becomes available, expect the 340 MHz value to
+apply; deviation would be surprising given the shared silicon
+architecture.
+
+### Verification
+
+On the HD 6850 with 0.6.2 installed:
+
+- 4K@60Hz over DP no longer offered in Screen prefs.
+- Syslog confirms the rejection: `is_mode_supported: rejecting
+  3840x2160 on Barts (pixel clock 533250 kHz exceeds 340 MHz
+  linear-scanout cap)`.
+- DVI-I, HDMI A, DP, second DVI-I all set 1920×1080 cleanly
+  cold-boot (the 4K monitor's DP EDID lists 1920×1080 as the
+  detailed-timing alternate to its 4K native mode; no intermediate
+  resolutions enumerated, which is a monitor-side EDID limitation,
+  not a driver-side filter — confirmed by syslog mode-list dump).
+
+---
+
 ## Proposed: AtomBIOS Robustness
 
 > **Status:** Proposed. No implementation work has started. Scope and
@@ -1633,6 +1773,7 @@ overlays, smooth scrolling) fall back to software paths.
 ---
 
 ## Bug Tracker Cross-Reference
+Anything marked as "Resolved" really means "expected to be resolved, but needs to be confirmed by the original ticket owner" until marked as ✅ confirmed.
 
 | Bug # | Title | Fix(es) | Status |
 |-------|-------|---------|--------|
@@ -1643,6 +1784,7 @@ overlays, smooth scrolling) fall back to software paths.
 | #17664 | Cedar app_server crash (0 MB framebuffer) | 0.3.0 (VRAM + spread spectrum) | Resolved |
 | #18470 | Variant of #17664 | 0.3.0 (VRAM) | Resolved |
 | [#19934] | Boot panic with HD 5670 on Ryzen 9600X (AM5) | Driver hardening: tolerate `vm_set_area_memory_type` failure (proposed; root cause is kernel MTRR slot exhaustion — out of fork scope). Detailed analysis in [`Bugs/19934 .../README.md`](../../Bugs/19934%20Boot%20fails%20on%20custom-built%20Ryzen%209600x/README.md) | Pending hardware (need HD 5670 + AM5 board) |
+| #20044 | radeon_hd - garbled output | | ✅ confirmed|
 
 #### Bugs likely covered by existing phases (need on-hardware verification)
 
