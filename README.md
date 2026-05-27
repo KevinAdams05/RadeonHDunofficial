@@ -44,21 +44,14 @@ Tested on Haiku hrev59697.
   and DisplayPort verified. The 128-bit memory bus tolerates higher
   pixel clocks than Caicos's 64-bit (1680×1680 @ 240 MHz scans clean)
   but still not 4K@60Hz. Capped at 250 MHz (see 0.5.0).
-- **HD 6850 (Barts PRO)** — 1080p@60Hz verified cold-boot on DVI-I,
+- **HD 6850 (Barts PRO)** — 1080p@60Hz verified on DVI-I,
   HDMI A, DisplayPort, and the second DVI-I port. This card was
   previously gated out of the driver entirely via an `#if 0` block in
   `driver.cpp` carrying a stale "Not working: #8765" comment from
   Haiku Trac ticket [#8765][8765] (filed 14 years ago against
   hrev44378 — black on DVI, vertical stripes on VGA). The block was
-  removed in 0.6.1; modern driver code initializes the card cleanly.
-  Card reports 1 GB VRAM, 5 connectors enumerated (DisplayPort, HDMI
-  A, DVI-I dual, DVI-D), idle thermal ~34°C. 4K@60Hz over DisplayPort
-  (533 MHz pixel clock) produced stride-aliased scanout corruption —
-  same architectural ceiling as the narrower-bus Caicos and Turks
-  chips — and is now capped at 340 MHz in 0.6.2 (matching the card's
-  native HDMI 1.4a ceiling). Intermediate modes between 1080p and 4K
-  (e.g. 1440p@60Hz, 4K@30Hz) not yet tested — the test monitor's EDID
-  advertised only 1080p and 4K@60Hz on its detailed timings.
+  removed in 0.6.1. 4K@60Hz over DisplayPort (533 MHz pixel clock) produced scanout corruption. Added a pixel cap @ 340 MHz in 0.6.2 (matching the card's
+  native HDMI 1.4a ceiling). Will try to fix that (or determine true highest resolution) in the next version.
 
 [8765]: https://dev.haiku-os.org/ticket/8765
 
@@ -144,7 +137,8 @@ for the changelog-format release notes see
 | [0.4.0](docs/fixes-by-version.md#040--edid-parser-hardening-forced-linear-scanout-caicos-cap) | 2026-05-05 | First standalone `.hpkg` — EDID range parser hardening, forced linear-aligned scanout, Caicos pixel-clock cap at 165 MHz |
 | [0.5.0](docs/fixes-by-version.md#050--turks-cap-and-square-mode-filter) | 2026-05-12 | Turks pixel-clock cap at 250 MHz, square-mode filter, per-chip cap framework refactor |
 | [0.6.0](docs/fixes-by-version.md#060--dppll-polish--hdmi-infoframe-groundwork) | 2026-05-12 | DP/PLL polish (no runtime change) + HDMI AVI infoframe groundwork (dormant — 0.2.0 DVI fallback still in effect) |
-
+| [0.6.1](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#061--hd-6850-barts-re-enabled) | 2025-05-27 | Re-enabled Radeon HD 6850 (0x6739) |
+| [0.6.2](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#062--barts-pixel-clock-cap) | 2025-05-27 |  Radeon HD 6850: 4K@60hz is not working yet, added a pixel cap for now. Will dive into that more in the next version. |
 ---
 
 
