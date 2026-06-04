@@ -49,4 +49,17 @@ void hdmi_avi_infoframe_program(uint8 crtcID);
 void hdmi_avi_infoframe_disable(uint8 crtcID);
 
 
+/*! Phase A instrumentation for the magenta-stripe investigation:
+	TRACE a read-back of every register hdmi_avi_infoframe_program()
+	touches, tagged with a caller-supplied stage label. Read-only —
+	safe to call at any point in the mode-set sequence. */
+void hdmi_registers_dump(uint8 crtcID, const char* stage);
+
+
+/*! Wide-block instrumentation: TRACE the raw 0x7000–0x70FF HDMI/AFMT
+	register window for one CRTC. Diff between encoder-mode boots to
+	isolate the AtomBIOS delta. Read-only. */
+void hdmi_block_dump(uint8 crtcID);
+
+
 #endif	// RADEON_HD_HDMI_H

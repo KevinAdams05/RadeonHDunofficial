@@ -28,11 +28,14 @@ extern "C" void _sPrintf(const char* format, ...);
 
 
 /*! Per-AFMT-block offset table — same six values Linux radeon's
-	eg_offsets[] uses. Indexed by AFMT instance, which for our
-	single-display test setups maps 1:1 from CRTC ID (one DIG encoder
-	per active CRTC in the canonical configuration). For multi-display
-	setups the right path is connector → DIG → AFMT, but we don't have
-	a multi-display configuration to validate against yet. */
+	eg_offsets[] uses (radeon_display.c). MUST be indexed by the DIG
+	encoder id from encoder_pick_dig(connectorIndex) — the DIG a
+	connector uses is determined by its UNIPHY object + link
+	enumeration in the AtomBIOS object table, and has nothing to do
+	with which CRTC scans out to it. (Found the hard way on the
+	AX5450: its HDMI port is UNIPHY1 link B = DIG3, while CRTC 0 does
+	the scanout — indexing by CRTC programmed dormant DIG0 and left
+	the live DIG3 AFMT unconfigured.) */
 static const uint32 kAfmtOffsets[] = {
 	EVERGREEN_AFMT0_OFFSET,
 	EVERGREEN_AFMT1_OFFSET,
@@ -152,23 +155,38 @@ _BuildAviInfoframe(const display_mode& mode, uint8 buffer[14])
 
 
 /*! Pack the 14-byte AVI payload into the four AFMT_AVI_INFO0..3
-	registers. PB0 (checksum) sits in the high byte of INFO3. */
+	registers, using the byte layout the packet generator actually
+	transmits (matches Linux evergreen_set_avi_packet(), which writes
+	from `buffer + 3` of the drm-packed frame):
+
+	  INFO0 = checksum | PB1 << 8 | PB2 << 16 | PB3 << 24
+	  INFO1 = PB4..PB7,   INFO2 = PB8..PB11
+	  INFO3 = PB12 | PB13 << 8 | version(2) << 24
+
+	The original 0.6.0 packing started INFO0 at PB1, shifting every
+	payload byte down by one: PB2 (aspect, 0x28) landed in the PB1
+	position, whose bits [6:5] = 01 then told the sink the stream was
+	YCbCr 4:2:2 — instantly wrong colors on sinks that honor the
+	infoframe. */
 static void
 _PackAviInfoframe(const uint8 buffer[14], uint32 afmtOffset)
 {
-	uint32 w0 = (uint32)buffer[1]
-		| ((uint32)buffer[2] << 8)
-		| ((uint32)buffer[3] << 16)
-		| ((uint32)buffer[4] << 24);
-	uint32 w1 = (uint32)buffer[5]
-		| ((uint32)buffer[6] << 8)
-		| ((uint32)buffer[7] << 16)
-		| ((uint32)buffer[8] << 24);
-	uint32 w2 = (uint32)buffer[9]
-		| ((uint32)buffer[10] << 8)
-		| ((uint32)buffer[11] << 16)
-		| ((uint32)buffer[12] << 24);
-	uint32 w3 = (uint32)buffer[13] | ((uint32)buffer[0] << 24);
+	uint32 w0 = (uint32)buffer[0]
+		| ((uint32)buffer[1] << 8)
+		| ((uint32)buffer[2] << 16)
+		| ((uint32)buffer[3] << 24);
+	uint32 w1 = (uint32)buffer[4]
+		| ((uint32)buffer[5] << 8)
+		| ((uint32)buffer[6] << 16)
+		| ((uint32)buffer[7] << 24);
+	uint32 w2 = (uint32)buffer[8]
+		| ((uint32)buffer[9] << 8)
+		| ((uint32)buffer[10] << 16)
+		| ((uint32)buffer[11] << 24);
+	uint32 w3 = (uint32)buffer[12]
+		| ((uint32)buffer[13] << 8)
+		| ((uint32)2 << 24);
+		// infoframe version 2 in the top byte
 
 	Write32(OUT, EVERGREEN_AFMT_AVI_INFO0 + afmtOffset, w0);
 	Write32(OUT, EVERGREEN_AFMT_AVI_INFO1 + afmtOffset, w1);
@@ -190,36 +208,57 @@ hdmi_avi_infoframe_program(uint8 crtcID)
 	if (info.chipsetID < RADEON_CEDAR)
 		return;
 
-	if (crtcID >= (sizeof(kAfmtOffsets) / sizeof(kAfmtOffsets[0])))
+	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
+	uint32 digID = encoder_pick_dig(connectorIndex);
+	if (digID >= (sizeof(kAfmtOffsets) / sizeof(kAfmtOffsets[0])))
 		return;
 
-	uint32 afmtOffset = kAfmtOffsets[crtcID];
+	uint32 afmtOffset = kAfmtOffsets[digID];
 	const display_mode& mode = gInfo->shared_info->current_mode;
 
 	uint8 buffer[14];
 	_BuildAviInfoframe(mode, buffer);
 
-	// Disable every packet generator we don't intend to use. AtomBIOS's
-	// encoder_mode_set leaves these in an undefined state after putting
-	// the encoder in ATOM_ENCODER_MODE_HDMI — any that are enabled
-	// without valid packet content will emit garbage bytes into the
-	// HBLANK data island. On Cedar/Evergreen those garbage bytes are
-	// what produces the magenta stripe along the left edge of the
-	// active region. Clearing these is part one of the fix; the AVI
-	// infoframe + KEEPOUT below is part two.
-	Write32(OUT, EVERGREEN_HDMI_VBI_PACKET_CONTROL + afmtOffset, 0);
+	// Disable the packet generators we don't intend to use, but keep
+	// the VBI block sending NULL and General Control packets. HDMI
+	// data-island periods must always carry validly-coded packets —
+	// with NULL_SEND off, the encoder transmits garbage during island
+	// windows where nothing is queued, which the sink decodes as
+	// visible pixels: the magenta stripe along the left edge of the
+	// active region. (Confirmed 2026-06-04: with NULL_SEND off and
+	// every value below read back as correctly programmed, the stripe
+	// still appeared. Linux evergreen_hdmi.c always enables
+	// NULL_SEND | GC_SEND | GC_CONT, and the GC packet carries the
+	// AVMUTE flag, cleared below.)
+	Write32(OUT, EVERGREEN_HDMI_VBI_PACKET_CONTROL + afmtOffset,
+		EVERGREEN_HDMI_NULL_SEND | EVERGREEN_HDMI_GC_SEND
+		| EVERGREEN_HDMI_GC_CONT);
 	Write32(OUT, EVERGREEN_HDMI_ACR_PACKET_CONTROL + afmtOffset, 0);
 	Write32(OUT, EVERGREEN_HDMI_GENERIC_PACKET_CONTROL + afmtOffset, 0);
 	Write32(OUT, EVERGREEN_HDMI_AUDIO_PACKET_CONTROL + afmtOffset, 0);
 	Write32(OUT, EVERGREEN_AFMT_AUDIO_PACKET_CONTROL + afmtOffset, 0);
 
-	// HDMI_CONTROL: enable KEEPOUT_MODE (suppresses active pixels during
-	// HBLANK so the data island doesn't bleed into visible scanout) and
-	// PACKET_GEN_VERSION. Leave DEEP_COLOR off — only 24-bit RGB for now.
+	// The General Control packet we just enabled carries the AVMUTE
+	// flag — make sure it's cleared, or compliant sinks blank the video.
+	uint32 gcControl = Read32(OUT, EVERGREEN_HDMI_GC + afmtOffset);
+	gcControl &= ~EVERGREEN_HDMI_GC_AVMUTE;
+	Write32(OUT, EVERGREEN_HDMI_GC + afmtOffset, gcControl);
+
+	// HDMI_CONTROL: clear the deep-color bits (24-bit RGB only) and
+	// leave everything else at its hardware/AtomBIOS default — exactly
+	// what Linux's dce4_hdmi_set_color_depth() does. Notably, do NOT
+	// set KEEPOUT_MODE or PACKET_GEN_VERSION: nothing in Linux's
+	// DCE 4/5 path touches either bit (PACKET_GEN_VERSION is an r6xx
+	// compatibility control), and KEEPOUT defines an active-pixel
+	// suppression window adjacent to the data island — i.e. at the
+	// left edge of the visible region, precisely where the magenta
+	// stripe appears. Earlier experiments (0.6.0 and 0.6.3~pre3/4) all
+	// ran with KEEPOUT set and all showed the stripe; this build tests
+	// the Linux-parity configuration with it off.
 	uint32 hdmiControl = Read32(OUT, EVERGREEN_HDMI_CONTROL + afmtOffset);
-	hdmiControl |= EVERGREEN_HDMI_KEEPOUT_MODE
-		| EVERGREEN_HDMI_PACKET_GEN_VERSION;
-	hdmiControl &= ~EVERGREEN_HDMI_DEEP_COLOR_ENABLE;
+	hdmiControl &= ~(EVERGREEN_HDMI_KEEPOUT_MODE
+		| EVERGREEN_HDMI_PACKET_GEN_VERSION
+		| EVERGREEN_HDMI_DEEP_COLOR_ENABLE);
 	Write32(OUT, EVERGREEN_HDMI_CONTROL + afmtOffset, hdmiControl);
 
 	_PackAviInfoframe(buffer, afmtOffset);
@@ -255,10 +294,12 @@ hdmi_avi_infoframe_disable(uint8 crtcID)
 	if (info.chipsetID < RADEON_CEDAR)
 		return;
 
-	if (crtcID >= (sizeof(kAfmtOffsets) / sizeof(kAfmtOffsets[0])))
+	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
+	uint32 digID = encoder_pick_dig(connectorIndex);
+	if (digID >= (sizeof(kAfmtOffsets) / sizeof(kAfmtOffsets[0])))
 		return;
 
-	uint32 afmtOffset = kAfmtOffsets[crtcID];
+	uint32 afmtOffset = kAfmtOffsets[digID];
 
 	// Stop transmitting the AVI infoframe.
 	Write32(OUT, EVERGREEN_HDMI_INFOFRAME_CONTROL0 + afmtOffset, 0);
@@ -271,4 +312,100 @@ hdmi_avi_infoframe_disable(uint8 crtcID)
 
 	TRACE("%s: CRTC %u: AVI infoframe disabled (offset 0x%" B_PRIx32 ")\n",
 		__func__, crtcID, afmtOffset);
+}
+
+
+/*! Phase A instrumentation for the Cedar magenta-stripe investigation:
+	read back every register hdmi_avi_infoframe_program() writes and
+	TRACE the values, so syslog shows whether our writes stick or get
+	clobbered by a later AtomBIOS call (DPMS / encoder setup) — suspect
+	number one from the 0.6.0 investigation. Read-only by design; safe
+	to call at any point in the mode-set sequence. */
+void
+hdmi_registers_dump(uint8 crtcID, const char* stage)
+{
+	radeon_shared_info& info = *gInfo->shared_info;
+
+	if (info.chipsetID < RADEON_CEDAR)
+		return;
+
+	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
+	uint32 digID = encoder_pick_dig(connectorIndex);
+	if (digID >= (sizeof(kAfmtOffsets) / sizeof(kAfmtOffsets[0])))
+		return;
+
+	uint32 afmtOffset = kAfmtOffsets[digID];
+
+	TRACE("%s: CRTC %u, DIG %" B_PRIu32 ", AFMT offset 0x%" B_PRIx32
+		" (%s):\n", __func__, crtcID, digID, afmtOffset, stage);
+	TRACE("  HDMI_CONTROL             0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_CONTROL + afmtOffset));
+	TRACE("  HDMI_INFOFRAME_CONTROL0  0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_INFOFRAME_CONTROL0 + afmtOffset));
+	TRACE("  HDMI_INFOFRAME_CONTROL1  0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_INFOFRAME_CONTROL1 + afmtOffset));
+	TRACE("  HDMI_VBI_PACKET_CONTROL  0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_VBI_PACKET_CONTROL + afmtOffset));
+	TRACE("  HDMI_GC                  0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_GC + afmtOffset));
+	TRACE("  HDMI_ACR_PACKET_CONTROL  0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_ACR_PACKET_CONTROL + afmtOffset));
+	TRACE("  HDMI_GENERIC_PACKET_CTRL 0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_GENERIC_PACKET_CONTROL + afmtOffset));
+	TRACE("  HDMI_AUDIO_PACKET_CTRL   0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_HDMI_AUDIO_PACKET_CONTROL + afmtOffset));
+	TRACE("  AFMT_AUDIO_PACKET_CTRL   0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_AFMT_AUDIO_PACKET_CONTROL + afmtOffset));
+	TRACE("  AFMT_AVI_INFO0..3        0x%08" B_PRIx32 " 0x%08" B_PRIx32
+		" 0x%08" B_PRIx32 " 0x%08" B_PRIx32 "\n",
+		Read32(OUT, EVERGREEN_AFMT_AVI_INFO0 + afmtOffset),
+		Read32(OUT, EVERGREEN_AFMT_AVI_INFO1 + afmtOffset),
+		Read32(OUT, EVERGREEN_AFMT_AVI_INFO2 + afmtOffset),
+		Read32(OUT, EVERGREEN_AFMT_AVI_INFO3 + afmtOffset));
+}
+
+
+/*! Wide-block instrumentation: TRACE the raw 0x7000–0x73FF window of
+	the connector's DIG block, 4 dwords per line (~65 syslog lines per
+	mode set). This was the A/B-diff tool that localized the
+	magenta-stripe root cause; its job is done, so it's compiled out by
+	default — define TRACE_HDMI_BLOCK_DUMP to re-enable when a bug
+	report needs a full DIG-block snapshot. The lighter
+	hdmi_registers_dump() and bandwidth_registers_dump() stay always-on
+	for bug-report syslogs. */
+//#define TRACE_HDMI_BLOCK_DUMP
+void
+hdmi_block_dump(uint8 crtcID)
+{
+#ifndef TRACE_HDMI_BLOCK_DUMP
+	(void)crtcID;
+	return;
+#else
+	radeon_shared_info& info = *gInfo->shared_info;
+
+	if (info.chipsetID < RADEON_CEDAR)
+		return;
+
+	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
+	uint32 digID = encoder_pick_dig(connectorIndex);
+	if (digID >= (sizeof(kAfmtOffsets) / sizeof(kAfmtOffsets[0])))
+		return;
+
+	uint32 afmtOffset = kAfmtOffsets[digID];
+
+	// 0x7000–0x73FF within the connector's DIG block: the DIG front
+	// end, HDMI/AFMT packet block, the DIG back end (DIG_BE_CNTL
+	// 0x7140-equivalent holds the encoder MODE field, bits 18:16), and
+	// the DP/SEC packet block.
+	TRACE("%s: CRTC %u raw DIG %" B_PRIu32 " block (base 0x7000 + 0x%"
+		B_PRIx32 "):\n", __func__, crtcID, digID, afmtOffset);
+	for (uint32 reg = 0x7000; reg < 0x7400; reg += 16) {
+		TRACE("  0x%04" B_PRIx32 ": %08" B_PRIx32 " %08" B_PRIx32
+			" %08" B_PRIx32 " %08" B_PRIx32 "\n", reg,
+			Read32(OUT, reg + afmtOffset),
+			Read32(OUT, reg + 4 + afmtOffset),
+			Read32(OUT, reg + 8 + afmtOffset),
+			Read32(OUT, reg + 12 + afmtOffset));
+	}
+#endif	// TRACE_HDMI_BLOCK_DUMP
 }

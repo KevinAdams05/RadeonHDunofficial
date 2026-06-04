@@ -493,18 +493,21 @@ display_get_encoder_mode(uint32 connectorIndex)
 				return ATOM_ENCODER_MODE_CRT;
 			break;
 		case VIDEO_CONNECTOR_HDMIA:
-			// HDMI is electrically backward-compatible with DVI. Until
-			// the magenta-stripe data-island bleed on Cedar/Evergreen
-			// is fully solved (see hdmi.cpp — infoframe + keepout +
-			// packet-generator disables landed but didn't suppress it,
-			// meaning there's a Cedar-specific register or sequence we
-			// haven't found yet), drive HDMI connectors as DVI. The
-			// underlying infoframe machinery is kept on disk and ready
-			// to re-enable as soon as the missing piece is found.
+			// Real HDMI mode. The Phase 1.5 DVI fallback (0.2.0–0.6.2)
+			// was retired in 0.6.3 when the magenta-stripe root cause
+			// was found: hdmi.cpp's AFMT programming was indexed by
+			// CRTC id, but the DIG an HDMI connector uses comes from
+			// its UNIPHY object + link enumeration (encoder_pick_dig)
+			// — so the live DIG's packet generator was never
+			// programmed and emitted unconfigured data islands. With
+			// the infoframe machinery hitting the right block (and
+			// the packing matching the hardware layout), HDMI mode is
+			// clean on Cedar.
 			//
 			// Linux only returns ATOM_ENCODER_MODE_HDMI when audio is
-			// actually enabled; mirror that conservative default.
-			return ATOM_ENCODER_MODE_DVI;
+			// enabled; we return it for video as well since we now
+			// transmit a valid AVI infoframe either way.
+			return ATOM_ENCODER_MODE_HDMI;
 		case VIDEO_CONNECTOR_DVID:
 		default:
 			return ATOM_ENCODER_MODE_DVI;

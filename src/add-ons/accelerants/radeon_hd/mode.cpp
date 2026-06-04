@@ -176,6 +176,66 @@ radeon_dpms_set_hook(int mode)
 }
 
 
+/*! Phase A instrumentation for the scanout-watermark investigation
+	(docs/scanout-watermark-investigation.md): TRACE a read-back of the
+	line-buffer split, priority counters, latency watermarks, and DMIF
+	buffer allocation that the VBIOS/GOP (or nobody) left behind for the
+	mode we just set. Read-only by design.
+
+	The PIPE arbitration/latency pair is dumped at both candidate
+	per-pipe strides — 0x10 per Linux evergreen_program_watermarks(),
+	0x20 per our earlier groundwork notes — so real-hardware values can
+	disambiguate which is correct. (Identical for pipe 0, which is why
+	the second read is gated on id > 0.)
+
+	Both CRTCs of the first pair are dumped regardless of which one is
+	active: the line buffer is shared between them, so the idle CRTC's
+	split setting matters too. */
+static void
+bandwidth_registers_dump()
+{
+	radeon_shared_info& info = *gInfo->shared_info;
+
+	// These registers exist on DCE 4/5 (Evergreen / Northern Islands)
+	// only; DCE 6 moved the arbitration pair to the DPG block.
+	if (info.chipsetID < RADEON_CEDAR || info.chipsetID >= RADEON_TAHITI)
+		return;
+
+	static const uint32 kCrtcOffsets[2] = {
+		EVERGREEN_CRTC0_REGISTER_OFFSET,
+		EVERGREEN_CRTC1_REGISTER_OFFSET
+	};
+
+	for (uint8 id = 0; id < 2; id++) {
+		uint32 crtcOffset = kCrtcOffsets[id];
+
+		TRACE("%s: CRTC %u bandwidth/watermark state:\n", __func__, id);
+		TRACE("  DC_LB_MEMORY_SPLIT        0x%08" B_PRIx32 "\n",
+			Read32(OUT, EVERGREEN_DC_LB_MEMORY_SPLIT + crtcOffset));
+		TRACE("  PRIORITY_A_CNT            0x%08" B_PRIx32 "\n",
+			Read32(OUT, EVERGREEN_PRIORITY_A_CNT + crtcOffset));
+		TRACE("  PRIORITY_B_CNT            0x%08" B_PRIx32 "\n",
+			Read32(OUT, EVERGREEN_PRIORITY_B_CNT + crtcOffset));
+		TRACE("  ARBITRATION_CONTROL3/0x10 0x%08" B_PRIx32 "\n",
+			Read32(OUT, EVERGREEN_PIPE0_ARBITRATION_CONTROL3
+				+ id * 0x10));
+		TRACE("  LATENCY_CONTROL/0x10      0x%08" B_PRIx32 "\n",
+			Read32(OUT, EVERGREEN_PIPE0_LATENCY_CONTROL + id * 0x10));
+		if (id > 0) {
+			TRACE("  ARBITRATION_CONTROL3/0x20 0x%08" B_PRIx32 "\n",
+				Read32(OUT, EVERGREEN_PIPE0_ARBITRATION_CONTROL3
+					+ id * 0x20));
+			TRACE("  LATENCY_CONTROL/0x20      0x%08" B_PRIx32 "\n",
+				Read32(OUT, EVERGREEN_PIPE0_LATENCY_CONTROL
+					+ id * 0x20));
+		}
+		TRACE("  DMIF_BUFFER_CONTROL       0x%08" B_PRIx32 "\n",
+			Read32(OUT, EVERGREEN_PIPE0_DMIF_BUFFER_CONTROL
+				+ id * EVERGREEN_PIPE_REGISTER_STRIDE));
+	}
+}
+
+
 status_t
 radeon_set_display_mode(display_mode* mode)
 {
@@ -245,13 +305,19 @@ radeon_set_display_mode(display_mode* mode)
 	display_crtc_lock(crtcID, ATOM_DISABLE);
 	encoder_output_lock(false);
 
-	// NB: HDMI infoframe programming (hdmi.cpp / hdmi_avi_infoframe_program)
-	// was wired in here behind a VIDEO_CONNECTOR_HDMIA gate but does not
-	// currently suppress the magenta-stripe data-island bleed on Cedar.
-	// Disabled at the encoder-mode level instead (display_get_encoder_mode
-	// returns ATOM_ENCODER_MODE_DVI for HDMIA — the Phase 1.5 workaround).
-	// The infoframe machinery stays on disk for a future attempt once the
-	// missing Cedar-specific register or sequence is identified.
+	// Phase A instrumentation (magenta-stripe investigation): program the
+	// AVI infoframe with read-back logging while the encoder itself stays
+	// in DVI mode (display_get_encoder_mode still returns
+	// ATOM_ENCODER_MODE_DVI for HDMIA — the Phase 1.5 workaround), so the
+	// desktop stays clean. The read-back here, compared against the one
+	// at the end of this function, answers investigation suspect #1: do
+	// our HDMI-block writes stick, or does a later AtomBIOS call clobber
+	// them? Flipping the encoder back to ATOM_ENCODER_MODE_HDMI is the
+	// follow-up once the writes are confirmed to stick.
+	if (gConnector[connectorIndex]->type == VIDEO_CONNECTOR_HDMIA) {
+		hdmi_avi_infoframe_program(crtcID);
+		hdmi_registers_dump(crtcID, "right after infoframe program");
+	}
 
 	#ifdef TRACE_MODE
 	// for debugging
@@ -278,6 +344,19 @@ radeon_set_display_mode(display_mode* mode)
 	TRACE("D2CRTC_BLANK_CONTROL Value: 0x%X\n",
 		Read32(CRT, AVIVO_D1CRTC_BLANK_CONTROL));
 	#endif
+
+	// Phase A instrumentation, second sample: if these values differ
+	// from the "right after infoframe program" dump above, something in
+	// the remaining mode-set path (AtomBIOS DPMS / lock release)
+	// reprogrammed the HDMI block behind our back.
+	if (gConnector[connectorIndex]->type == VIDEO_CONNECTOR_HDMIA) {
+		hdmi_registers_dump(crtcID, "end of mode set");
+		hdmi_block_dump(crtcID);
+	}
+
+	// Phase A instrumentation (scanout-watermark investigation): what
+	// bandwidth-arbitration state did this mode set leave behind?
+	bandwidth_registers_dump();
 
 	return B_OK;
 }

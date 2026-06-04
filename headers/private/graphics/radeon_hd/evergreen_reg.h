@@ -341,12 +341,19 @@
  * AVI infoframe + HDMI_KEEPOUT_MODE, the data island is correctly
  * interpreted as packet data and the workaround can be retired.
  */
-#define EVERGREEN_AFMT0_OFFSET						0x0
-#define EVERGREEN_AFMT1_OFFSET						0x800
-#define EVERGREEN_AFMT2_OFFSET						0x1400
-#define EVERGREEN_AFMT3_OFFSET						0x1c00
-#define EVERGREEN_AFMT4_OFFSET						0x2400
-#define EVERGREEN_AFMT5_OFFSET						0x2c00
+/* One AFMT block per DIG encoder; the blocks sit inside the DIG
+ * register ranges (DIG0 0x7000, DIG1 0x7C00, DIG2 0x10800, DIG3
+ * 0x11400, DIG4 0x12000, DIG5 0x12C00), so the per-instance offsets
+ * relative to the DIG0-based register defines above are the same
+ * values Linux reuses from EVERGREEN_CRTCn_REGISTER_OFFSET for its
+ * afmt[] table (radeon_display.c eg_offsets[]). Index by DIG id from
+ * encoder_pick_dig(), NOT by CRTC id. */
+#define EVERGREEN_AFMT0_OFFSET						(0x7000 - 0x7000)
+#define EVERGREEN_AFMT1_OFFSET						(0x7C00 - 0x7000)
+#define EVERGREEN_AFMT2_OFFSET						(0x10800 - 0x7000)
+#define EVERGREEN_AFMT3_OFFSET						(0x11400 - 0x7000)
+#define EVERGREEN_AFMT4_OFFSET						(0x12000 - 0x7000)
+#define EVERGREEN_AFMT5_OFFSET						(0x12C00 - 0x7000)
 
 /* Per-block AFMT / HDMI register base addresses. Add the AFMTn offset
  * above to address a specific block's copy. */
@@ -358,6 +365,10 @@
 #define EVERGREEN_HDMI_AUDIO_PACKET_CONTROL			0x7038
 #define EVERGREEN_HDMI_ACR_PACKET_CONTROL			0x703C
 #define EVERGREEN_HDMI_VBI_PACKET_CONTROL			0x7040
+#define		EVERGREEN_HDMI_NULL_SEND				(1 << 0)
+#define		EVERGREEN_HDMI_GC_SEND					(1 << 4)
+#define		EVERGREEN_HDMI_GC_CONT					(1 << 5)
+	/* GC_CONT: 0 = send GC packet once, 1 = every frame */
 
 #define EVERGREEN_HDMI_INFOFRAME_CONTROL0			0x7044
 #define		EVERGREEN_HDMI_AVI_INFO_SEND			(1 << 0)
