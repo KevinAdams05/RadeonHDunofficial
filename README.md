@@ -25,25 +25,35 @@ Tested on Haiku hrev59697.
 
 | Brand | Model | PCI ID | Family | Codename | VGA | DVI | HDMI | DP |
 |-------|-------|--------|--------|----------|:---:|:---:|:----:|:--:|
-| PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | ⬜ | ➖ | ✅ | ⬜ |
+| PowerColor AX5450 | Radeon HD 5450 | `0x68f9` | Evergreen | Cedar | ✅  | ✅ | ✅ | ➖ |
 | AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ |
-| AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ⬜ | ✅ | ⬜ | ✅ |
+| AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ➖ | ✅ | ➖ | ✅ |
 | Sapphire | Radeon HD 6850 | `0x6739` | Northern Islands | Barts PRO | ➖ | ✅ | ✅ | ✅ |
+
 
 ### Notes
 
-- **AX5450 (Cedar)** — 1080p@60Hz on HDMI verified. HDMI connector is
-  driven as DVI per the 0.2.0 fallback until the magenta-stripe
-  data-island bleed is fully solved.
+- **AX5450 (Cedar)** — 1080p@60Hz, 1600×1200, and 1024×768 over HDMI
+  verified on 0.6.3 in **real HDMI encoder mode** — the magenta-stripe
+  data-island bleed is fixed (root cause: the AFMT packet generator
+  was programmed on the wrong DIG instance; see the 0.6.3 section in
+  [`docs/technical-documentation.md`](docs/technical-documentation.md)).
+  The 0.2.0 DVI fallback is retired. DPMS off→on cycle verified —
+  colors and infoframe state survive a monitor power-down (the AFMT
+  block is preserved across the AtomBIOS DPMS sequence on Cedar).
+  VGA and DVI outputs also verified on 0.6.3.
 - **HD 7470 / 8470 (Caicos XT)** — 1080p@60Hz on DisplayPort and
   DVI-D Single Link, cold-boot verified. Higher modes including
   4K@60Hz are capped at 165 MHz pixel clock due to memory-bandwidth
   limits of the linear-scanout path on this 64-bit-bus chip (see
   0.4.0).
 - **HD 6570 / 7570 / 8550 / R5 230 (Turks PRO)** — 1080p@60Hz on DVI-I
-  and DisplayPort verified. The 128-bit memory bus tolerates higher
+  and DisplayPort re-verified on 0.6.3 (DP link trains clean at
+  270 MHz × 2 lanes). The 128-bit memory bus tolerates higher
   pixel clocks than Caicos's 64-bit (1680×1680 @ 240 MHz scans clean)
-  but still not 4K@60Hz. Capped at 250 MHz (see 0.5.0).
+  but still not 4K@60Hz. Capped at 250 MHz (see 0.5.0). Known
+  cosmetic issue: probing the *unconnected* second DP port logs
+  harmless `dp_aux` timeout noise at boot (see `docs/TODO.md`).
 - **HD 6850 (Barts PRO)** — 1080p@60Hz verified on DVI-I,
   HDMI A, DisplayPort, and the second DVI-I port. This card was
   previously gated out of the driver entirely via an `#if 0` block in
@@ -52,6 +62,10 @@ Tested on Haiku hrev59697.
   hrev44378 — black on DVI, vertical stripes on VGA). The block was
   removed in 0.6.1. 4K@60Hz over DisplayPort (533 MHz pixel clock) produced scanout corruption. Added a pixel cap @ 340 MHz in 0.6.2 (matching the card's
   native HDMI 1.4a ceiling). Will try to fix that (or determine true highest resolution) in the next version.
+  DVI, HDMI, and DP all re-verified on 0.6.3 — HDMI now in real HDMI
+  encoder mode on this card's UNIPHY2-linkB→DIG5 topology (a different
+  DIG than Cedar's, confirming the 0.6.3 DIG-routing fix is general);
+  DP link trains clean at 270 MHz × 2 lanes.
 
 [8765]: https://dev.haiku-os.org/ticket/8765
 
@@ -138,7 +152,8 @@ for the changelog-format release notes see
 | [0.5.0](docs/fixes-by-version.md#050--turks-cap-and-square-mode-filter) | 2026-05-12 | Turks pixel-clock cap at 250 MHz, square-mode filter, per-chip cap framework refactor |
 | [0.6.0](docs/fixes-by-version.md#060--dppll-polish--hdmi-infoframe-groundwork) | 2026-05-12 | DP/PLL polish (no runtime change) + HDMI AVI infoframe groundwork (dormant — 0.2.0 DVI fallback still in effect) |
 | [0.6.1](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#061--hd-6850-barts-re-enabled) | 2025-05-27 | Re-enabled Radeon HD 6850 (0x6739) |
-| [0.6.2](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#062--barts-pixel-clock-cap) | 2025-05-27 |  Radeon HD 6850: 4K@60hz is not working yet, added a pixel cap for now. Will dive into that more in the next version. |
+| [0.6.2](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#062--barts-pixel-clock-cap) | 2025-05-27 |  Radeon HD 6850: 4K@60hz is not working yet, added a pixel cap for now. |
+| [0.6.3](docs/fixes-by-version.md#063--hdmi-magenta-stripe-root-cause-fixed-dcn-guard-kernel-hardening) | 2026-06-04 | HDMI magenta stripe fixed. DVI fallback retired, real HDMI mode on DCE4+. DCN GPUs refused gracefully with framebuffer fallback, PCI BAR-assignment guard, etc... |
 ---
 
 

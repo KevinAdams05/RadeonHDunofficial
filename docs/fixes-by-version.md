@@ -148,3 +148,39 @@ Generalizes the per-chip cap framework and adds a second chip:
   the path to lifting the cap and stays in-scope for this driver-only
   fork (see also the prior `bandwidth.cpp` experiment notes in
   technical-documentation.md).
+
+## 0.6.3 — HDMI magenta-stripe root cause fixed, DCN guard, kernel hardening
+
+*2026-06-04*
+
+- **Cedar/DCE4+ HDMI magenta stripe fixed at the root — the 0.2.0
+  DVI fallback is retired and HDMI-A connectors run in real HDMI
+  encoder mode.** The 0.6.0 infoframe groundwork contained three
+  stacked bugs: the AFMT packet-generator block was indexed by CRTC
+  id instead of the DIG id from `encoder_pick_dig()` (on the AX5450
+  the HDMI port is UNIPHY1 link B = DIG3 while CRTC 0 scans out, so
+  every write landed in a dormant block); the AFMT offset table used
+  a fabricated 0x800 stride instead of the real DIG block offsets;
+  and the AVI infoframe register packing was byte-shifted, which once
+  transmitted told the sink the RGB stream was YCbCr 4:2:2. With all
+  three fixed (plus Linux-parity null-packet/GC filler in the VBI
+  generator), HDMI is clean on Cedar at every tested mode, and VGA /
+  DVI / DPMS are regression-verified. Full forensic write-up in
+  technical-documentation.md.
+- **DCN-class GPUs are now refused gracefully.** Raven-family APUs
+  and everything Navi and newer have a DCN display engine that this
+  AtomBIOS-driven driver cannot program (see
+  `dce-vs-dcn-driver-boundaries.md`). The device scan now skips them
+  with a clear syslog message instead of binding and failing midway,
+  so app_server falls back to the VESA/framebuffer driver.
+- **Kernel-side hardening:** PCI BAR-assignment guard (refuses
+  devices whose BARs the firmware left unprogrammed — Haiku ticket
+  #3 — instead of failing confusingly in `map_physical_memory`),
+  six memory/area leak fixes on driver and AtomBIOS-mapping error
+  paths, and bounds validation of the ACPI VFCT table before any
+  dereference.
+- **Bug-report instrumentation:** every mode set now logs a compact
+  HDMI/AFMT register read-back and a bandwidth/watermark register
+  dump to syslog (~45 lines total), so user-attached syslogs carry
+  the state needed to diagnose encoder and scanout-arbitration
+  issues remotely.

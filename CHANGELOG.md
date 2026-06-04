@@ -13,6 +13,105 @@ experiments, and Linux references — see
 
 ---
 
+## [0.6.3] — 2026-06-04
+
+### Fixed
+
+- **Cedar HDMI magenta stripe — root cause found and fixed; the
+  Phase 1.5 DVI fallback is retired and HDMI-A connectors run in real
+  HDMI encoder mode.** Three stacked bugs in the 0.6.0 infoframe
+  groundwork, each masking the next:
+  1. `hdmi.cpp` indexed the AFMT block by **CRTC id**, but the DIG
+     encoder a connector uses is determined by its UNIPHY object +
+     link enumeration (`encoder_pick_dig()`). On the AX5450 the HDMI
+     port is UNIPHY1 link B = **DIG3** while CRTC 0 scans out — every
+     infoframe/packet write landed in dormant DIG0, so the live DIG3
+     packet generator stayed unconfigured and emitted garbage data
+     islands (the stripe), while every register read-back "confirmed"
+     a correct configuration.
+  2. The `EVERGREEN_AFMTn_OFFSET` table used a fabricated uniform
+     0x800 stride; real AFMT blocks sit inside the DIG ranges
+     (0x0/0xC00/0x9800/0xA400/0xB000/0xBC00 — Linux `eg_offsets[]`).
+  3. `_PackAviInfoframe()` byte-shifted the payload (PB1-first instead
+     of checksum-first), so once writes finally reached the live block
+     the sink read PB2 in PB1's position and decoded the RGB stream as
+     YCbCr 4:2:2 (wildly wrong colors). The packing now matches
+     Linux's `evergreen_set_avi_packet()` layout: checksum | PB1–3 in
+     INFO0, PB12 | PB13 | version in INFO3.
+  Also part of the working recipe (Linux parity): the VBI packet
+  generator now sends `NULL_SEND | GC_SEND | GC_CONT` (null-packet
+  island filler + General Control packet, AVMUTE cleared) instead of
+  being disabled, and `HDMI_CONTROL` leaves KEEPOUT_MODE /
+  PACKET_GEN_VERSION at hardware defaults (nothing in Linux's DCE 4/5
+  path sets them). Verified clean at 1080p@60 on the AX5450 (Cedar),
+  hrev59697, 2026-06-04.
+
+- **`mapAtomBIOSACPI()` now bounds-checks the ACPI VFCT table** in
+  `radeon_hd.cpp` before dereferencing it (mirrors the validation Linux
+  performs in `radeon_acpi_vfct_bios()`). Previously
+  `VBIOSImageOffset`, `ImageLength`, and the AtomBIOS header pointer at
+  image offset 0x48 were all trusted blindly, so a malformed or hostile
+  VFCT table could send the kernel reading out of bounds. The function
+  now verifies, in order: the table is at least `sizeof(UEFI_ACPI_VFCT)`
+  per its own `TableLength`; the image header lies inside the table;
+  the vbios image (header + `ImageLength`) lies inside the table; the
+  image is big enough to contain the 0x48 header pointer; and the
+  4-byte signature the pointer references stays inside the image. Each
+  failure returns `B_BAD_DATA` with a specific syslog diagnostic
+  (offset/length/table size) and falls through to the other bios-read
+  methods. Also fixed the copied-rom-invalid path leaking
+  `info.rom_area` (same pattern as the `mapAtomBIOS()` leaks below).
+
+- **Kernel-area leaks on `radeon_hd_init()` error paths** in
+  `radeon_hd.cpp`. The shared-info, MMIO-register, and framebuffer
+  areas were released from their `AreaKeeper` RAII wrappers immediately
+  after creation, so the framebuffer-too-small, framebuffer-map-failed,
+  and no-AtomBIOS error returns leaked up to three kernel areas per
+  failed init (the caller, `device_open()`, only runs
+  `radeon_hd_uninit()` after a *successful* init). The keepers now stay
+  armed until the end of the function and are detached together just
+  before the success return, so every error path cleans up
+  automatically.
+- **AtomBIOS rom-area leaks in `mapAtomBIOS()`**: the
+  rom-size-is-zero and copied-rom-invalid failure paths returned
+  without deleting the just-created `info.rom_area` (and left the
+  stale area id in place, where a later getbios attempt would
+  overwrite it). Both paths now delete the area and reset
+  `info.rom_area` to -1.
+- **`pci_info` allocation leak in `init_driver()`** in `driver.cpp`:
+  the `strdup`/`malloc` failure breaks left the just-allocated
+  `pci_info` unreleased. Both paths now free it.
+
+### Added
+
+- **Graceful refusal of DCN-class GPUs** (Raven-family APUs and
+  everything Navi and newer) in `driver.cpp`'s device scan. These
+  chips replaced the AtomBIOS-driven DCE display engine with DCN,
+  which this driver's AtomBIOS command-table backend cannot program
+  (see `docs/dce-vs-dcn-driver-boundaries.md`). Previously the device
+  table matched them and the driver would bind and fail midway through
+  init; now `get_next_radeon_hd()` skips them with a clear syslog
+  diagnostic naming the chip and the reason, so the driver never
+  publishes a device node and app_server falls back cleanly to the
+  VESA/framebuffer driver (which works on these cards via the UEFI
+  GOP). Note: Raven is listed as DCE 12 in the device table but its
+  display engine is DCN 1.0, so the guard keys on
+  `chipsetID >= RADEON_RAVEN` rather than the table's dceMajor.
+- **PCI BAR-assignment guard** in `driver.cpp`'s `init_driver()`,
+  ported from the same guard in the AST2400 (unofficial) driver. On
+  boards where the firmware leaves a GPU's BARs unprogrammed, Haiku's
+  PCI bus manager does not assign them (Haiku ticket #3, open since
+  2005), so the framebuffer/MMIO BARs read back as base=0 / size=0 and
+  `radeon_hd_init()`'s `map_physical_memory()` calls fail in confusing
+  ways. The new `validate_bars()` checks the framebuffer BAR (BAR0,
+  composing the high dword when 64-bit) and the MMIO BAR (BAR2
+  pre-Bonaire, BAR5 on Sea Islands and newer, matching
+  `radeon_hd_pci_bar_mmio()`), refuses to bind with a syslog pointer
+  to Haiku #3 when either is unassigned or suspiciously below 1 MB,
+  and lets the VESA fallback take over cleanly.
+
+---
+
 ## [0.6.2] — 2026-05-27
 
 ### Added

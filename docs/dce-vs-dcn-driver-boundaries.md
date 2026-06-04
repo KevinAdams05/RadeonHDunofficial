@@ -260,25 +260,6 @@ when you need historical/origin context on DC and DCN.
 | https://www.x.org/wiki/Events/XDC2017/ | XDC 2017 program — Harry Wentland's "DC: Display Core Next" talk. Slides linked from program. |
 | https://www.phoronix.com — search "AMDGPU DC mainline 4.15" | Phoronix coverage of DC's December 2017 merge into Linux 4.15. Multiple articles. Journalism-grade for forum/ticket comments. |
 
-### Recommended citation pattern for a Trac comment
-
-For asserting "this card needs DCN support which radeon_hd doesn't
-provide," structure the citation block like this:
-
-```markdown
-AMD's display engine for Vega APU and newer is **Display Core Next
-(DCN)**, documented in the Linux kernel at
-https://docs.kernel.org/gpu/amdgpu/display/dcn-overview.html. DCN
-chips are programmed through AMD's `dc` library
-([Linux source tree](https://github.com/torvalds/linux/tree/master/drivers/gpu/drm/amd/display/dc))
-rather than the AtomBIOS command tables used by older DCE-based chips
-([Linux radeon `atombios.h`](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/radeon/atombios.h)).
-Haiku's `radeon_hd` is built around the AtomBIOS path and does not
-implement a DCN backend.
-```
-
-That's three Tier-1/Tier-2 URLs and no claim that requires defending
-my "architectural cliff" editorial framing.
 
 ### Things to avoid asserting without a primary source
 

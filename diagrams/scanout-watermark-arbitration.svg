@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" font-family="DejaVu Sans, Verdana, sans-serif">
+  <title>Evergreen/NI scanout bandwidth arbitration and where corruption comes from</title>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#444"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#b3261e"/>
+    </marker>
+  </defs>
+
+  <text x="490" y="30" text-anchor="middle" font-size="19" font-weight="bold" fill="#222">
+    Scanout bandwidth arbitration — DCE 4 / DCE 5 (Evergreen, Northern Islands)
+  </text>
+
+  <!-- VRAM -->
+  <rect x="40" y="70" width="150" height="90" rx="8" fill="#dde7f5" stroke="#3c5a8a" stroke-width="2"/>
+  <text x="115" y="105" text-anchor="middle" font-size="15" font-weight="bold" fill="#1d3557">VRAM</text>
+  <text x="115" y="126" text-anchor="middle" font-size="11" fill="#333">GDDR5 / DDR3</text>
+  <text x="115" y="142" text-anchor="middle" font-size="11" fill="#333">channels: MC_SHARED_CHMAP</text>
+
+  <!-- Memory controller -->
+  <rect x="260" y="60" width="210" height="180" rx="8" fill="#e8f0e4" stroke="#3a6b35" stroke-width="2"/>
+  <text x="365" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#234d20">Memory Controller</text>
+  <text x="365" y="108" text-anchor="middle" font-size="12" fill="#333">client arbitration</text>
+  <rect x="280" y="122" width="170" height="44" rx="5" fill="#fff" stroke="#3a6b35" stroke-width="1.4"/>
+  <text x="365" y="140" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#234d20">PRIORITY_A/B_CNT (0x6b18/1c)</text>
+  <text x="365" y="157" text-anchor="middle" font-size="11" fill="#333">mark[14:0] · ALWAYS_ON(20)</text>
+  <text x="365" y="190" text-anchor="middle" font-size="11" fill="#555">other clients: 3D engine,</text>
+  <text x="365" y="206" text-anchor="middle" font-size="11" fill="#555">blit/copy, GART, CPU window</text>
+
+  <!-- DMIF -->
+  <rect x="540" y="60" width="200" height="180" rx="8" fill="#fdf3dd" stroke="#9c7a1c" stroke-width="2"/>
+  <text x="640" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#6e5310">DMIF</text>
+  <text x="640" y="108" text-anchor="middle" font-size="12" fill="#333">display request engine</text>
+  <rect x="556" y="122" width="168" height="44" rx="5" fill="#fff" stroke="#9c7a1c" stroke-width="1.4"/>
+  <text x="640" y="140" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#6e5310">PIPE0_LATENCY_CONTROL</text>
+  <text x="640" y="157" text-anchor="middle" font-size="11" fill="#333">0x0bf4 + crtc·0x10 — wm A/B</text>
+  <text x="640" y="190" text-anchor="middle" font-size="11" fill="#555">urgency asserted when FIFO</text>
+  <text x="640" y="206" text-anchor="middle" font-size="11" fill="#555">level crosses the watermark</text>
+
+  <!-- Line buffer -->
+  <rect x="790" y="60" width="150" height="180" rx="8" fill="#f3e6f0" stroke="#7a3b6e" stroke-width="2"/>
+  <text x="865" y="88" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a2a52">Line Buffer</text>
+  <rect x="804" y="104" width="122" height="44" rx="5" fill="#fff" stroke="#7a3b6e" stroke-width="1.4"/>
+  <text x="865" y="122" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a2a52">DC_LB_MEMORY_SPLIT</text>
+  <text x="865" y="139" text-anchor="middle" font-size="11" fill="#333">0x6b0c + crtc off.</text>
+  <text x="865" y="172" text-anchor="middle" font-size="11" fill="#555">whole: 7680×2 (DCE4)</text>
+  <text x="865" y="188" text-anchor="middle" font-size="11" fill="#555">8192×2 (DCE5)</text>
+  <text x="865" y="204" text-anchor="middle" font-size="11" fill="#555">half if 2 heads share</text>
+
+  <!-- CRTC -->
+  <rect x="790" y="300" width="150" height="80" rx="8" fill="#e3eef6" stroke="#2a5d7c" stroke-width="2"/>
+  <text x="865" y="332" text-anchor="middle" font-size="15" font-weight="bold" fill="#1d4357">CRTC scanout</text>
+  <text x="865" y="354" text-anchor="middle" font-size="11" fill="#333">fixed drain rate =</text>
+  <text x="865" y="370" text-anchor="middle" font-size="11" fill="#333">pixel clock × 4 B/px</text>
+
+  <!-- flows -->
+  <line x1="190" y1="115" x2="258" y2="115" stroke="#444" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <line x1="470" y1="115" x2="538" y2="115" stroke="#444" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <line x1="740" y1="115" x2="788" y2="115" stroke="#444" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <line x1="865" y1="240" x2="865" y2="298" stroke="#444" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <text x="330" y="258" text-anchor="middle" font-size="11" fill="#444"></text>
+
+  <!-- failure path -->
+  <rect x="60" y="300" width="640" height="110" rx="8" fill="#fdebea" stroke="#b3261e" stroke-width="2"/>
+  <text x="380" y="328" text-anchor="middle" font-size="14" font-weight="bold" fill="#b3261e">
+    Failure mode at high pixel clocks (unprogrammed watermarks / priority)
+  </text>
+  <text x="380" y="352" text-anchor="middle" font-size="12" fill="#5c1612">
+    Watermarks stay at VBIOS console-mode values → DMIF requests too late, MC never elevates priority
+  </text>
+  <text x="380" y="372" text-anchor="middle" font-size="12" fill="#5c1612">
+    → line buffer drains faster than it fills → FIFO underrun mid-line →
+  </text>
+  <text x="380" y="392" text-anchor="middle" font-size="12" font-weight="bold" fill="#5c1612">
+    stride-aliased garbage (the Caicos / Turks / Barts corruption behind the pixel-clock caps)
+  </text>
+  <line x1="700" y1="355" x2="788" y2="345" stroke="#b3261e" stroke-width="2.2" stroke-dasharray="6,4" marker-end="url(#arrowRed)"/>
+
+  <!-- fix summary -->
+  <rect x="60" y="445" width="880" height="85" rx="8" fill="#eaf3ea" stroke="#3a6b35" stroke-width="2"/>
+  <text x="500" y="472" text-anchor="middle" font-size="14" font-weight="bold" fill="#234d20">
+    Fix (per mode set, every CRTC): program all three groups — Linux evergreen_bandwidth_update() equivalent
+  </text>
+  <text x="500" y="495" text-anchor="middle" font-size="12" fill="#234d20">
+    1. LB split (whole buffer when single head)   2. latency watermark from clocks + mode timing (both A/B slots; no DPM)
+  </text>
+  <text x="500" y="515" text-anchor="middle" font-size="12" fill="#234d20">
+    3. priority marks, forcing PRIORITY_ALWAYS_ON when the mode's average bandwidth exceeds the per-head allocation
+  </text>
+</svg>

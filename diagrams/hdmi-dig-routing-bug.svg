@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="620" viewBox="0 0 980 620" font-family="DejaVu Sans, Verdana, sans-serif">
+  <title>The magenta-stripe root cause: AFMT programming indexed by CRTC instead of DIG</title>
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#444"/>
+    </marker>
+    <marker id="aRed" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#b3261e"/>
+    </marker>
+    <marker id="aGreen" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#2e7d32"/>
+    </marker>
+  </defs>
+
+  <text x="490" y="30" text-anchor="middle" font-size="19" font-weight="bold" fill="#222">
+    Magenta-stripe root cause — AFMT writes routed by CRTC id instead of DIG id
+  </text>
+  <text x="490" y="52" text-anchor="middle" font-size="13" fill="#555">
+    AX5450 (Cedar): HDMI connector = UNIPHY1 link B = DIG3, while CRTC 0 does the scanout
+  </text>
+
+  <!-- CRTC0 -->
+  <rect x="40" y="90" width="160" height="70" rx="8" fill="#e3eef6" stroke="#2a5d7c" stroke-width="2"/>
+  <text x="120" y="118" text-anchor="middle" font-size="15" font-weight="bold" fill="#1d4357">CRTC 0</text>
+  <text x="120" y="140" text-anchor="middle" font-size="11" fill="#333">scanout timing + pixels</text>
+
+  <!-- DIG3 (live) -->
+  <rect x="330" y="90" width="300" height="120" rx="8" fill="#eaf3ea" stroke="#2e7d32" stroke-width="2.5"/>
+  <text x="480" y="115" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">DIG3 (LIVE) — block 0x11400</text>
+  <text x="480" y="135" text-anchor="middle" font-size="11.5" fill="#333">FE: SYMCLK_FE_ON = 1 (clocked)</text>
+  <rect x="350" y="146" width="260" height="50" rx="5" fill="#fff" stroke="#2e7d32" stroke-width="1.4"/>
+  <text x="480" y="165" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#1b5e20">AFMT3 packet generator (offset 0xA400)</text>
+  <text x="480" y="184" text-anchor="middle" font-size="11" fill="#5c1612">never programmed → garbage data islands</text>
+
+  <!-- UNIPHY1-B -->
+  <rect x="710" y="90" width="150" height="70" rx="8" fill="#fdf3dd" stroke="#9c7a1c" stroke-width="2"/>
+  <text x="785" y="115" text-anchor="middle" font-size="14" font-weight="bold" fill="#6e5310">UNIPHY1</text>
+  <text x="785" y="133" text-anchor="middle" font-size="11.5" fill="#333">link B (enum 2)</text>
+  <text x="785" y="150" text-anchor="middle" font-size="11.5" fill="#333">TMDS PHY</text>
+
+  <!-- Monitor -->
+  <rect x="710" y="240" width="150" height="64" rx="8" fill="#f3e6f0" stroke="#7a3b6e" stroke-width="2"/>
+  <text x="785" y="266" text-anchor="middle" font-size="14" font-weight="bold" fill="#5a2a52">HDMI monitor</text>
+  <text x="785" y="288" text-anchor="middle" font-size="11" fill="#b3261e">⇒ magenta stripe</text>
+
+  <!-- DIG0 (dormant) -->
+  <rect x="330" y="270" width="300" height="120" rx="8" fill="#f2f2f2" stroke="#888" stroke-width="2" stroke-dasharray="7,5"/>
+  <text x="480" y="295" text-anchor="middle" font-size="15" font-weight="bold" fill="#555">DIG0 (DORMANT) — block 0x7000</text>
+  <text x="480" y="315" text-anchor="middle" font-size="11.5" fill="#666">FE: SYMCLK_FE_ON = 0 (unclocked)</text>
+  <rect x="350" y="326" width="260" height="50" rx="5" fill="#fff" stroke="#888" stroke-width="1.4"/>
+  <text x="480" y="345" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#555">AFMT0 packet generator (offset 0x0)</text>
+  <text x="480" y="364" text-anchor="middle" font-size="11" fill="#555">absorbs writes; read-backs "confirm" them</text>
+
+  <!-- driver -->
+  <rect x="40" y="296" width="200" height="68" rx="8" fill="#fdebea" stroke="#b3261e" stroke-width="2"/>
+  <text x="140" y="320" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#b3261e">hdmi.cpp (0.6.0–0.6.2)</text>
+  <text x="140" y="339" text-anchor="middle" font-size="11" fill="#5c1612">kAfmtOffsets[crtcID]</text>
+  <text x="140" y="355" text-anchor="middle" font-size="11" fill="#5c1612">crtcID = 0 → AFMT0</text>
+
+  <!-- flows -->
+  <line x1="200" y1="125" x2="328" y2="125" stroke="#444" stroke-width="2.2" marker-end="url(#a)"/>
+  <text x="264" y="116" text-anchor="middle" font-size="10.5" fill="#444">pixels</text>
+  <line x1="630" y1="125" x2="708" y2="125" stroke="#444" stroke-width="2.2" marker-end="url(#a)"/>
+  <line x1="785" y1="160" x2="785" y2="238" stroke="#444" stroke-width="2.2" marker-end="url(#a)"/>
+  <text x="800" y="205" font-size="10.5" fill="#444">TMDS</text>
+
+  <!-- wrong write path -->
+  <line x1="240" y1="330" x2="328" y2="330" stroke="#b3261e" stroke-width="2.4" marker-end="url(#aRed)"/>
+  <text x="284" y="321" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#b3261e">writes</text>
+
+  <!-- fix box -->
+  <rect x="40" y="440" width="900" height="150" rx="8" fill="#eaf3ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="490" y="468" text-anchor="middle" font-size="14.5" font-weight="bold" fill="#1b5e20">
+    The 0.6.3 fix — three stacked bugs corrected
+  </text>
+  <text x="60" y="494" font-size="12.5" fill="#1b5e20" font-weight="bold">1. Index by DIG:</text>
+  <text x="185" y="494" font-size="12" fill="#234d20">digID = encoder_pick_dig(connectorIndex) → UNIPHY1 link B → DIG3; writes finally reach the live packet generator</text>
+  <text x="60" y="520" font-size="12.5" fill="#1b5e20" font-weight="bold">2. Real offsets:</text>
+  <text x="185" y="520" font-size="12" fill="#234d20">kAfmtOffsets = DIG block strides 0x0 / 0xC00 / 0x9800 / 0xA400 / 0xB000 / 0xBC00 (was a fabricated 0x800 stride)</text>
+  <text x="60" y="546" font-size="12.5" fill="#1b5e20" font-weight="bold">3. Packing layout:</text>
+  <text x="185" y="546" font-size="12" fill="#234d20">INFO0 starts at the checksum, version byte caps INFO3 (byte-shifted payload had declared YCbCr 4:2:2 → wrong colors)</text>
+  <text x="60" y="572" font-size="12.5" fill="#1b5e20" font-weight="bold">+ Linux parity:</text>
+  <text x="185" y="572" font-size="12" fill="#234d20">VBI generator sends NULL + GC packets (mandatory island filler), AVMUTE clear, KEEPOUT/GEN_VERSION at defaults</text>
+</svg>

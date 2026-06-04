@@ -42,6 +42,12 @@ separately in [`CHANGELOG.md`](../CHANGELOG.md).
 - [0.6.0 — DP/PLL Polish and HDMI Infoframe Groundwork](#060--dppll-polish-and-hdmi-infoframe-groundwork)
 - [0.6.1 — HD 6850 (Barts) Re-enabled](#061--hd-6850-barts-re-enabled)
 - [0.6.2 — Barts Pixel-Clock Cap](#062--barts-pixel-clock-cap)
+- [0.6.3 — HDMI Magenta Stripe Root Cause: the Wrong DIG](#063--hdmi-magenta-stripe-root-cause-the-wrong-dig)
+  - [Bug 1 — AFMT block indexed by CRTC id instead of DIG id](#bug-1--afmt-block-indexed-by-crtc-id-instead-of-dig-id)
+  - [Bug 2 — fabricated AFMT offset table](#bug-2--fabricated-afmt-offset-table)
+  - [Bug 3 — byte-shifted AVI infoframe packing](#bug-3--byte-shifted-avi-infoframe-packing)
+  - [The elimination ladder](#the-elimination-ladder-test-builds-all-on-the-ax5450)
+- [0.6.3 — Kernel Hardening, DCN Guard, and Instrumentation](#063--kernel-hardening-dcn-guard-and-instrumentation)
 - [Proposed: AtomBIOS Robustness](#proposed-atombios-robustness)
 - [Proposed: R600/R700 Hardening](#proposed-r600r700-hardening)
 - [Proposed: NI/Polaris Extensions](#proposed-nipolaris-extensions)
@@ -1487,6 +1493,202 @@ On the HD 6850 with 0.6.2 installed:
   detailed-timing alternate to its 4K native mode; no intermediate
   resolutions enumerated, which is a monitor-side EDID limitation,
   not a driver-side filter — confirmed by syslog mode-list dump).
+
+---
+
+## 0.6.3 — HDMI Magenta Stripe Root Cause: the Wrong DIG
+
+**Files:** `src/add-ons/accelerants/radeon_hd/hdmi.cpp`,
+`display.cpp`, `headers/private/graphics/radeon_hd/evergreen_reg.h`
+**Date:** 2026-06-04
+**Hardware:** PowerColor AX5450 (Cedar, `1002:68f9`), 1080p@60 HDMI
+
+Diagram: [`../diagrams/hdmi-dig-routing-bug.svg`](../diagrams/hdmi-dig-routing-bug.svg)
+
+### Background
+
+The magenta stripe — a thin, resolution-independent artifact at the
+left edge of the active region whenever an HDMI-A connector ran in
+real `ATOM_ENCODER_MODE_HDMI` — had been open since 0.1.0 (see the
+0.2.0 section above). The 0.6.0 infoframe groundwork (AVI infoframe
+builder, KEEPOUT, packet-generator disables) was implemented
+specifically to fix it, didn't, and the Phase 1.5 DVI fallback stayed
+in place through 0.6.2.
+
+The root cause turned out to be **three stacked bugs in the 0.6.0
+groundwork itself**, each one masking the next. The 0.2.0 diagnosis
+("unconfigured data islands decoded as pixels") was correct all along
+— the cure was simply never delivered to the hardware.
+
+### Bug 1 — AFMT block indexed by CRTC id instead of DIG id
+
+`hdmi_avi_infoframe_program()` selected its AFMT register block with
+`kAfmtOffsets[crtcID]`. But the DIG encoder (and therefore the AFMT
+packet generator) a connector uses has **nothing to do with which CRTC
+scans out to it** — it is fixed by the connector's encoder object and
+link enumeration in the AtomBIOS object table, exactly what
+`encoder_pick_dig()` computes:
+
+| Encoder object | link A | link B |
+|---|---|---|
+| `INTERNAL_UNIPHY` | DIG0 | DIG1 |
+| `INTERNAL_UNIPHY1` | DIG2 | **DIG3** |
+| `INTERNAL_UNIPHY2` | DIG4 | DIG5 |
+
+On the AX5450 the HDMI port is **UNIPHY1, enumeration 2 (link B) →
+DIG3**, while the desktop scans out from CRTC 0. Every infoframe and
+packet-control write — through the entire 0.6.0 campaign and eleven
+0.6.3 pre-builds — landed in **dormant DIG0** and was absorbed
+silently, while live DIG3's packet generator stayed at reset values
+emitting garbage data islands: the stripe.
+
+This is also why the bug resisted diagnosis so effectively: register
+read-backs *confirmed* every write ("the configuration is correct"),
+and an A/B wide-block dump of DIG0 between DVI-mode and HDMI-mode
+boots came back **bit-identical** — the block being dumped was simply
+not the one doing the work. That bit-identical diff was the tell that
+broke the case.
+
+### Bug 2 — fabricated AFMT offset table
+
+`EVERGREEN_AFMTn_OFFSET` used a uniform `0x800` stride
+(`0x0/0x800/0x1400/…`) that matches no Evergreen hardware. The AFMT
+blocks live inside the DIG register ranges, so the real offsets are
+the DIG block strides — the same values Linux reuses from
+`EVERGREEN_CRTCn_REGISTER_OFFSET` for its `afmt[]` table
+(`radeon_display.c` `eg_offsets[]`):
+
+```
+DIG0 0x0      DIG1 0xC00    DIG2 0x9800
+DIG3 0xA400   DIG4 0xB000   DIG5 0xBC00
+```
+
+Even a correct DIG3 lookup would have missed with the old table.
+
+### Bug 3 — byte-shifted AVI infoframe packing
+
+`_PackAviInfoframe()` packed `AFMT_AVI_INFO0` starting at PB1. The
+packet generator's actual layout (Linux `evergreen_set_avi_packet()`,
+which writes from `frame = buffer + 3` of the drm-packed frame):
+
+```
+INFO0 = checksum | PB1 << 8 | PB2 << 16 | PB3 << 24
+INFO1 = PB4..PB7          INFO2 = PB8..PB11
+INFO3 = PB12 | PB13 << 8 | version(2) << 24
+```
+
+With bugs 1 + 2 fixed, the byte-shifted payload finally *transmitted*
+— and the sink read PB2 (`0x28`) in PB1's position, whose bits [6:5]
+= `01` declare **YCbCr 4:2:2**. The monitor dutifully decoded the RGB
+stream as YCbCr: instantly, wildly wrong colors. (Diagnostically
+useful, in hindsight: it proved the infoframe was being received and
+honored for the first time.)
+
+### Supporting corrections (Linux video-path parity)
+
+Established during the elimination phase and retained in the working
+recipe:
+
+- `HDMI_VBI_PACKET_CONTROL` = `NULL_SEND | GC_SEND | GC_CONT`, with
+  AVMUTE cleared in `HDMI_GC`. HDMI data-island periods must always
+  carry validly-coded packets; null packets are the mandatory filler.
+  The 0.6.0 code disabled this generator along with the others.
+- `HDMI_CONTROL`: only the deep-color bits are touched (cleared), as
+  in Linux `dce4_hdmi_set_color_depth()`. `KEEPOUT_MODE` and
+  `PACKET_GEN_VERSION` are left at hardware defaults — nothing in
+  Linux's DCE 4/5 path sets either bit (`PACKET_GEN_VERSION` is an
+  r6xx-era compatibility control).
+- Notable Linux behavior found during the comparison:
+  `radeon_atom_get_encoder_mode()` only returns
+  `ATOM_ENCODER_MODE_HDMI` when audio is enabled — Linux *never* runs
+  the minimal video-only HDMI configuration this driver now uses. Our
+  recipe is the video-relevant subset of Linux's audio path.
+
+### The elimination ladder (test builds, all on the AX5450)
+
+| Build | Change | Stripe? |
+|---|---|---|
+| pre3 | HDMI mode, 0.6.0 config as-was | yes |
+| pre4 | + NULL_SEND/GC/AVMUTE | yes |
+| pre5 | + KEEPOUT/GEN_VERSION cleared (full AFMT Linux parity) | yes |
+| pre6–pre10 | instrumentation: A/B wide-block dumps DVI vs HDMI → bit-identical → wrong-instance hypothesis → connector table shows UNIPHY1 link B | — |
+| pre11 | fix bugs 1 + 2 (DIG3, real offsets) | gone — but colors wrong (bug 3 now exposed) |
+| pre12 | fix bug 3 (packing) | **gone, colors correct** |
+
+### Outcome
+
+- HDMI-A connectors run in real `ATOM_ENCODER_MODE_HDMI`; the
+  Phase 1.5 DVI fallback (0.2.0–0.6.2) is retired.
+- Verified clean at 1080p@60, 1600×1200, 1024×768 on Cedar; VGA and
+  DVI outputs regression-tested clean on the same card.
+- **Topology generality confirmed on the HD 6850 (Barts):** its HDMI
+  port sits on UNIPHY2 link B → **DIG5** (AFMT offset 0xBC00) — a
+  different encoder object, link, and DIG than Cedar's UNIPHY1-B →
+  DIG3 — and `encoder_pick_dig()` routed the infoframe programming
+  there automatically. Clean output, correct colors, real HDMI mode,
+  1080p@60. The DIG number was predicted from the connector table
+  before the test boot and matched exactly.
+- DPMS off→on verified: the AFMT/infoframe state survives a monitor
+  power-down on Cedar, so no re-program call is needed in the DPMS-on
+  path. (hdmi.h's warning about AFMT state loss across DPMS proved
+  not to apply on this hardware; revisit if a DPMS color regression
+  ever shows up on another chip.)
+- `hdmi_registers_dump()` (12 lines) and
+  `bandwidth_registers_dump()` (17 lines) remain always-on per mode
+  set for bug-report syslogs; the 65-line `hdmi_block_dump()` is
+  compiled out behind `TRACE_HDMI_BLOCK_DUMP`.
+- Lesson recorded for future work: when read-backs confirm writes but
+  behavior doesn't change, suspect the wrong *instance* of a
+  multi-instance block before suspecting the values.
+
+---
+
+## 0.6.3 — Kernel Hardening, DCN Guard, and Instrumentation
+
+**Files:** `src/add-ons/kernel/drivers/graphics/radeon_hd/driver.cpp`,
+`radeon_hd.cpp`; `src/add-ons/accelerants/radeon_hd/mode.cpp`
+**Date:** 2026-06-04
+
+The same release carries a kernel-side hardening pass and the
+instrumentation that powered the magenta-stripe investigation:
+
+- **PCI BAR-assignment guard** (`validate_bars()` in `driver.cpp`):
+  refuses to bind devices whose framebuffer or MMIO BARs the firmware
+  left unprogrammed — Haiku ticket #3, the bus manager performs no
+  resource assignment — instead of failing confusingly later in
+  `map_physical_memory()`. Composes 64-bit BARs before checking, and
+  selects the correct MMIO BAR per generation (BAR2 pre-Bonaire,
+  BAR5 for Sea Islands+). Modeled on the equivalent guard in the
+  AST2400 (unofficial) driver.
+- **DCN-class GPUs refused gracefully** in `get_next_radeon_hd()`:
+  Raven-family APUs and everything Navi+ have a DCN display engine
+  that an AtomBIOS-command-table driver cannot program (see
+  [`dce-vs-dcn-driver-boundaries.md`](dce-vs-dcn-driver-boundaries.md)).
+  The scan now skips them with a clear syslog diagnostic so
+  app_server falls back to the VESA/framebuffer driver. The guard
+  keys on `chipsetID >= RADEON_RAVEN` because the device table
+  mislabels Raven as DCE 12 (its display engine is DCN 1.0).
+- **Six kernel leak fixes**: `radeon_hd_init()`'s error paths leaked
+  up to three kernel areas per failed init (fixed by keeping the
+  `AreaKeeper`s armed until a single success-point detach);
+  `mapAtomBIOS()` and `mapAtomBIOSACPI()` leaked `rom_area` on
+  validation-failure paths; `init_driver()` leaked its `pci_info`
+  allocation on `strdup`/`malloc` failure.
+- **ACPI VFCT bounds validation** in `mapAtomBIOSACPI()`: table size,
+  image-header offset, image length, and the AtomBIOS header pointer
+  are all validated before any dereference (mirrors Linux's
+  `radeon_acpi_vfct_bios()`); failures return `B_BAD_DATA` with a
+  specific diagnostic and fall through to the other bios-read methods.
+- **Always-on bug-report instrumentation** per mode set
+  (~45 syslog lines): `hdmi_registers_dump()` (the HDMI/AFMT packet
+  state, twice — once after programming, once at end of mode set, so
+  clobbering is visible in any user syslog) and
+  `bandwidth_registers_dump()` (line-buffer split, priority counters,
+  latency watermarks — the Phase A baseline for the scanout-watermark
+  investigation, see
+  [`scanout-watermark-investigation.md`](scanout-watermark-investigation.md)).
+  The 65-line raw DIG block dump used for the A/B encoder-mode diff
+  is compiled out behind `TRACE_HDMI_BLOCK_DUMP`.
 
 ---
 
