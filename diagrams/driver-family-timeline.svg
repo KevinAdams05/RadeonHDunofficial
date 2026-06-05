@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 380" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="tlBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4299e1"/>
+      <stop offset="100%" stop-color="#2b6cb0"/>
+    </linearGradient>
+    <linearGradient id="tlGreen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#48bb78"/>
+      <stop offset="100%" stop-color="#2f855a"/>
+    </linearGradient>
+    <linearGradient id="tlGray" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f7fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <filter id="tlShadow" x="-4%" y="-8%" width="108%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#00000022"/>
+    </filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="450" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#1a202c">Haiku AMD Driver Coverage vs. Display-Engine Generations</text>
+  <text x="450" y="53" text-anchor="middle" font-size="12" fill="#718096">Each architectural "cliff" maps to a driver-family boundary</text>
+
+  <!-- Year axis -->
+  <line x1="70" y1="84" x2="858" y2="84" stroke="#a0aec0" stroke-width="1.5"/>
+  <!-- ticks + year labels: 2000 / 2007 / 2013 / 2017 / present -->
+  <g font-size="11" fill="#4a5568" font-weight="600" text-anchor="middle">
+    <line x1="80"  y1="80" x2="80"  y2="88" stroke="#a0aec0" stroke-width="1.5"/><text x="80"  y="74">~2000</text>
+    <line x1="250" y1="80" x2="250" y2="88" stroke="#a0aec0" stroke-width="1.5"/><text x="250" y="74">~2007</text>
+    <line x1="450" y1="80" x2="450" y2="88" stroke="#a0aec0" stroke-width="1.5"/><text x="450" y="74">~2013</text>
+    <line x1="620" y1="80" x2="620" y2="88" stroke="#a0aec0" stroke-width="1.5"/><text x="620" y="74">~2017</text>
+    <line x1="850" y1="80" x2="850" y2="88" stroke="#a0aec0" stroke-width="1.5"/><text x="850" y="74">present</text>
+  </g>
+
+  <!-- Cliff vertical guide lines -->
+  <g stroke="#cbd5e0" stroke-width="1.5" stroke-dasharray="6,4">
+    <line x1="250" y1="92" x2="250" y2="270"/>
+    <line x1="450" y1="92" x2="450" y2="270"/>
+    <line x1="620" y1="92" x2="620" y2="270"/>
+  </g>
+
+  <!-- radeon (R100–R500) — exists -->
+  <rect x="80" y="104" width="170" height="44" rx="8" fill="url(#tlBlue)" filter="url(#tlShadow)"/>
+  <text x="165" y="126" text-anchor="middle" font-size="14" font-weight="700" fill="white">radeon</text>
+  <text x="165" y="141" text-anchor="middle" font-size="10" fill="#e2eefb">R100 / R200 / R300 / R400 / R500</text>
+
+  <!-- radeon_hd (DCE 1.0 → DCE 12.0) — exists, fork focus -->
+  <rect x="250" y="160" width="370" height="44" rx="8" fill="url(#tlGreen)" filter="url(#tlShadow)"/>
+  <!-- internal DCE6 -> DCE8 sub-cliff divider at 2013 -->
+  <line x1="450" y1="160" x2="450" y2="204" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.7"/>
+  <text x="435" y="183" text-anchor="middle" font-size="14" font-weight="700" fill="white">radeon_hd</text>
+  <text x="350" y="198" text-anchor="middle" font-size="9.5" fill="#e6f6ee">DCE 1.0 → 6</text>
+  <text x="535" y="198" text-anchor="middle" font-size="9.5" fill="#e6f6ee">DCE 8 → 12</text>
+  <!-- focus badge -->
+  <rect x="556" y="166" width="58" height="16" rx="8" fill="#ffffff" opacity="0.92"/>
+  <text x="585" y="178" text-anchor="middle" font-size="9" font-weight="700" fill="#2f855a">fork focus</text>
+
+  <!-- radeon_dcn (DCN 1 → 3+) — does NOT exist -->
+  <rect x="620" y="216" width="238" height="44" rx="8" fill="url(#tlGray)" stroke="#a0aec0" stroke-width="1.5" stroke-dasharray="7,4"/>
+  <text x="739" y="238" text-anchor="middle" font-size="14" font-weight="700" fill="#718096">radeon_dcn</text>
+  <text x="739" y="253" text-anchor="middle" font-size="10" fill="#a0aec0">DCN 1 → DCN 3+  ·  does not exist</text>
+
+  <!-- Cliff captions -->
+  <g font-size="10.5" text-anchor="middle">
+    <text x="250" y="288" font-weight="700" fill="#c53030">Cliff 1 — R500 → R600</text>
+    <text x="250" y="302" fill="#718096">AtomBIOS + DCE 1.0 begin</text>
+
+    <text x="450" y="288" font-weight="700" fill="#b7791f">Cliff 3 — DCE 6 → DCE 8</text>
+    <text x="450" y="302" fill="#718096">GCN sub-cliff (same driver)</text>
+
+    <text x="620" y="288" font-weight="700" fill="#c53030">Cliff 2 — DCE 12 → DCN 1.0</text>
+    <text x="620" y="302" fill="#718096">AtomBIOS wall → direct register</text>
+  </g>
+
+  <!-- Legend -->
+  <g font-size="11" fill="#4a5568">
+    <rect x="80" y="332" width="22" height="14" rx="4" fill="url(#tlGreen)"/>
+    <text x="110" y="343" font-weight="600">Implemented in Haiku</text>
+    <rect x="300" y="332" width="22" height="14" rx="4" fill="url(#tlGray)" stroke="#a0aec0" stroke-width="1.5" stroke-dasharray="7,4"/>
+    <text x="330" y="343" font-weight="600">Not implemented (≈100K-LOC DAL port)</text>
+  </g>
+</svg>

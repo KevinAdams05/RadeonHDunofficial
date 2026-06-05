@@ -5,14 +5,9 @@
 # RadeonHD (Unofficial) — Technical Documentation
 
 This document is the consolidated technical reference for the RadeonHD
-(unofficial) fork. It walks every shipped fix from 0.1.0 (initial Cedar /
-Evergreen HDMI corruption work) through 0.6.0 (DP/PLL polish and HDMI AVI
-infoframe groundwork), plus the per-release version history is summarized
-separately in [`CHANGELOG.md`](../CHANGELOG.md).
+(unofficial) fork. It walks through every shipped fix.
 
 > Repository: [https://github.com/KevinAdams05/RadeonHDunofficial](https://github.com/KevinAdams05/RadeonHDunofficial)
-> Author: Kevin Adams (with Claude Opus 4.6 / 4.7)
-> Branch carrying the fixes against Haiku master: `KevinMain`
 
 ---
 
@@ -175,16 +170,6 @@ the right answer is this fork won't help.
 | RDNA1 | DCN 1.0 | Navi10 (RX 5500/5600/5700) | DCN |
 | RDNA2 / Renoir | DCN 2.x | Renoir (Ryzen 4x00U/5x00U), Lucienne, Navi2x (RX 6x00) | DCN |
 | RDNA3 | DCN 3.x | Navi3x (RX 7x00) | DCN |
-
-### Out of scope cards tickets
-These Haiku tickets won't be resolved with this driver since they are related to out of scope cards (or APUs).
-
-- [#14800], [#17660] — Vega10 DCE 12.0
-- [#15044] — Vega M GH (Kaby Lake-G hybrid platform; AtomBIOS jmp loop with unknown register `mmDC_GPIO_HPD_A` — non-standard EMIB-coupled silicon)
-- [#16393], [#17525] — Picasso/Raven DCN APU
-- [#17377] — Navi10 RDNA1
-- [#17516] — Lucienne DCN APU
-- [#17939] — Renoir DCN APU
 
 
 ---
@@ -1384,7 +1369,7 @@ On a Sapphire HD 6850 in the Supermicro X11SSH-LN4F test bench:
   may have been fixed by unrelated work since the gate went in.
 - The next defensive block worth re-investigating is the
   `#if 0`-wrapped `{0x6850, 6, 0, RADEON_TURKS, ..., "Radeon HD 7570"}`
-  at `driver.cpp:274-277` (Haiku ticket #12026). Same pattern: stale
+  at `driver.cpp:274-277` (Haiku ticket [#12026]). Same pattern: stale
   comment, untested in modern driver code, may now work.
 
 ---
@@ -1748,7 +1733,7 @@ boot environments, and a few specific OEM chassis:
    scratch buffer, or pre-copy mutable regions during init.
 4. **Host-quirk table.** A small static array keyed on
    `subsystem_vendor_id` + `subsystem_id` for known-broken OEM
-   chassis (#15062 Acer AXC-704 first entry).
+   chassis ([#15062] Acer AXC-704 first entry).
 
 ### Bugs closed by this phase
 
@@ -1975,23 +1960,23 @@ overlays, smooth scrolling) fall back to software paths.
 ---
 
 ## Bug Tracker Cross-Reference
-Anything marked as "Resolved" really means "expected to be resolved, but needs to be confirmed by the original ticket owner" until marked as ✅ confirmed.
+
+This first table lists only the tickets we believe our fixes **resolve**. "Resolved" here means "expected to be resolved, pending confirmation by the original ticket owner"; ✅ confirmed marks the ones verified on the reporter's hardware. Tickets we think are only *improved*, or that still need hardware to verify, are in the tables that follow.
 
 | Bug # | Title | Fix(es) | Status |
 |-------|-------|---------|--------|
-| #8154 | Garbled display on iMac (HD 6750M) | 0.3.0 (spread spectrum) | Likely improved |
-| #8339 | HD 6450 hash in image | 0.3.0 (spread spectrum) | Likely improved |
-| #8485 | HD 6770 second display black | 0.3.0 (DPMS + DP training) | Improved |
-| #10939 | Kabini display issues | 0.3.0 (VRAM + CHIP_APU flags) | Resolved |
-| #17664 | Cedar app_server crash (0 MB framebuffer) | 0.3.0 (VRAM + spread spectrum) | Resolved |
-| #18470 | Variant of #17664 | 0.3.0 (VRAM) | Resolved |
-| [#19934] | Boot panic with HD 5670 on Ryzen 9600X (AM5) | Driver hardening: tolerate `vm_set_area_memory_type` failure (proposed; root cause is kernel MTRR slot exhaustion — out of fork scope). Detailed analysis in [`Bugs/19934 .../README.md`](../../Bugs/19934%20Boot%20fails%20on%20custom-built%20Ryzen%209600x/README.md) | Pending hardware (need HD 5670 + AM5 board) |
-| #20044 | radeon_hd - garbled output | | ✅ confirmed|
+| [#10939] | Kabini display issues | 0.3.0 (VRAM + CHIP_APU flags) | Resolved |
+| [#17664] | Cedar app_server crash (0 MB framebuffer) | 0.3.0 (VRAM + spread spectrum) | Resolved |
+| [#18470] | Variant of [#17664] | 0.3.0 (VRAM) | Resolved |
+| [#20044] | radeon_hd - garbled output | | ✅ confirmed |
 
 #### Bugs likely covered by existing phases (need on-hardware verification)
 
 | Bug # | Title | Hardware | Likely fix(es) |
 |-------|-------|----------|----------------|
+| [#8154] | Garbled display on iMac (HD 6750M) | Whistler/Turks NI DCE 5.0 (mobile) | 0.3.0 (spread spectrum) — *improved, not confirmed* |
+| [#8339] | HD 6450 hash in image | Caicos NI DCE 5.0 | 0.3.0 (spread spectrum) — *improved, not confirmed* |
+| [#8485] | HD 6770 second display black | Juniper Evergreen DCE 4.0 | 0.3.0 (DPMS + DP training) — *improved, not confirmed* |
 | [#9964] | Unsupported laptop native mode for HD 5470 | Cedar Evergreen DCE 4.0 | 0.1.0 (pixel-clock) + 0.4.0 (EDID range) |
 | [#10327] | HD 6870 DisplayPort black screen | Barts NI DCE 5.0 | 0.3.0 (DPMS + DP training) |
 | [#10335] | radeon_hd needs better external DP encoders (Travis) | Travis bridge | 0.3.0 (DPMS + DP training) |
@@ -2026,13 +2011,13 @@ Anything marked as "Resolved" really means "expected to be resolved, but needs t
 | [#19348] | AtomBIOS ROM should be read-only in userspace | All chips | **AtomBIOS robustness** — interpreter R/W audit |
 | [#8457] | Blank screen on Mobility 4670 HD (LVDS native mode) | RV730 R700 DCE 3.2 | **R600/R700 hardening** — LVDS/EDID native-mode |
 | [#11242] | HD 3470 external display problem | RV620 R600 DCE 3.2 | **R600/R700 hardening** — multi-head LVDS |
-| [#11907] | HD 3470 display problem after external display | RV620 R600 DCE 3.2 | **R600/R700 hardening** — same as #11242 |
+| [#11907] | HD 3470 display problem after external display | RV620 R600 DCE 3.2 | **R600/R700 hardening** — same as [#11242] |
 | [#12642] | HD 2400 no video at full HD | RV610 R600 DCE 1.0 | **R600/R700 hardening** — high-res mode-set |
 | [#12970] | HD 2600 Pro Dual Head Support | RV630 R600 DCE 1.0 | **R600/R700 hardening** — dual-CRTC + DPMS |
 | [#15125] | HD 4710 only works at 1920x1080@32 | RV730 R700 DCE 3.x | **R600/R700 hardening** — mode-set/PLL |
 | [#19166] | Glitches when changing resolution / workspaces | RV620 R600 DCE 3.x | **R600/R700 hardening** — scanout/CRTC reprogram |
 | [#12313] | Black screen with 6470M (hybrid laptop) | Seymour NI DCE 5.0 + Sumo APU | **NI/Polaris extensions** — dGPU+APU hybrid muxing |
-| [#19170] | 6620G (Sumo) + 6650M (Whistler) black screen | Sumo Llano APU DCE 4.1 + Whistler NI DCE 5.0 | **NI/Polaris extensions** — dGPU+APU hybrid muxing (same root cause as #12313) |
+| [#19170] | 6620G (Sumo) + 6650M (Whistler) black screen | Sumo Llano APU DCE 4.1 + Whistler NI DCE 5.0 | **NI/Polaris extensions** — dGPU+APU hybrid muxing (same root cause as [#12313]) |
 | [#14918] | Add support for RX 580 | Polaris10 DCE 11.2 | **NI/Polaris extensions** — PCI ID + enablement |
 | [#17279] | Screen tearing with 32bit color | Caicos NI DCE 5.0 | **NI/Polaris extensions** — vsync/scanout 32bpp |
 | [#14607] | UltraWide displays not supported | Polaris11 DCE 11.2 | **NI/Polaris extensions** — ultrawide modeset |
@@ -2043,11 +2028,12 @@ Anything marked as "Resolved" really means "expected to be resolved, but needs t
 
 | Bug # | Hardware | Why out of scope |
 |-------|----------|-------------------|
-| [#9503] | RV770 R700 | Already resolved (duplicate of closed #11358) |
+| [#9503] | RV770 R700 | Already resolved (duplicate of closed [#11358]) |
 | [#14800] | Vega10 GFX9 DCE 12.0 | DCE 12.0 unsupported in radeon_hd |
 | [#15044] | Vega M GH Kaby-G hybrid | Beyond DCE block scope |
 | [#16393] | Picasso DCN 1.0 (APU) | DCN-era display engine — radeon_hd is DCE-only |
-| [#16884] | Generic (kernel MTRR exhaustion) | Same class as #19934 — kernel/arch x86 issue |
+| [#16884] | Generic (kernel MTRR exhaustion) | Same class as [#19934] — kernel/arch x86 issue |
+| [#19934] | Redwood Evergreen (HD 5670) on Ryzen 9600X / AM5 | Kernel MTRR slot exhaustion (same class as [#16884]). A driver-side mitigation (tolerate `vm_set_area_memory_type` failure) is **proposed but unverified** — needs HD 5670 + AM5 hardware. Analysis: [`Bugs/19934 .../README.md`](../../Bugs/19934%20Boot%20fails%20on%20custom-built%20Ryzen%209600x/README.md) |
 | [#17377] | Navi10 RDNA1 DCN 1.0 | DCN-era — not radeon_hd |
 | [#17516] | Lucienne DCN (APU) | DCN-era — not radeon_hd |
 | [#17525] | Raven/Picasso DCN 1.0 (APU) | DCN-era — not radeon_hd |
@@ -2059,10 +2045,10 @@ Anything marked as "Resolved" really means "expected to be resolved, but needs t
 
 ### Notes
 
-- Bugs #8154 and #8339 involve display "hash" (noise / garbling). The
+- Bugs [#8154] and [#8339] involve display "hash" (noise / garbling). The
   spread spectrum fix in 0.3.0 addresses one known cause, but those cards
   may also be affected by framebuffer write issues not addressed here.
-- Bug #8485 (second DP display black) requires functional DisplayPort and
+- Bug [#8485] (second DP display black) requires functional DisplayPort and
   proper DPMS — the 0.3.0 DPMS + DP-training fixes address the software
   side, but hardware-level DP support depends on the specific card's BIOS.
 - The Polaris PLL routing fix in 0.3.0 (`pll_external_init()` change) is
@@ -2107,8 +2093,7 @@ Anything marked as "Resolved" really means "expected to be resolved, but needs t
 The Linux `radeon` kernel driver (DRM) was used as a reference. The goal of
 this fork is to develop **Haiku-first** — we may examine other drivers to
 understand things like register mapping and init sequences, but **no Linux
-code is copied directly**. License compatibility is irrelevant when no code
-crosses the boundary; that line is drawn explicitly to keep the fork clean.
+code is copied directly**. This line is drawn explicitly to keep the fork clean.
 
 The fixes here align with Linux behavior in the following ways:
 
@@ -2190,3 +2175,6 @@ The fixes here align with Linux behavior in the following ways:
 [#19170]: https://dev.haiku-os.org/ticket/19170
 [#19281]: https://dev.haiku-os.org/ticket/19281
 [#19348]: https://dev.haiku-os.org/ticket/19348
+[#11358]: https://dev.haiku-os.org/ticket/11358
+[#12026]: https://dev.haiku-os.org/ticket/12026
+[#20044]: https://dev.haiku-os.org/ticket/20044

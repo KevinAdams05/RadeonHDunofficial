@@ -3,10 +3,11 @@
 
 # DCE vs DCN — and what marks the boundaries between Haiku's AMD graphics drivers
 
-Companion reference for [`technical-documentation.md`](technical-documentation.md).
 This document explains the architectural distinctions between AMD's
 display engine generations and how they map to driver-family boundaries
 in Haiku.
+
+**We are excluding DCN cards from this driver** a message will get logged to syslog and Haiku should fall back to the framebuffer driver.
 
 ## DCE vs DCN — what they are
 
@@ -32,6 +33,21 @@ GPU's BIOS ROM); DCN bypasses AtomBIOS and writes registers directly.
 Drivers built around AtomBIOS calls (Haiku's `radeon_hd`, Linux's old
 `radeon`) cannot drive DCN at all without a fundamentally different
 display backend.
+
+
+## The Haiku picture
+
+![Haiku AMD driver coverage across AMD display-engine generations](../diagrams/driver-family-timeline.svg)
+
+Haiku currently has the first two boxes (`radeon` and `radeon_hd`).
+The third doesn't exist — and porting it is a project on the order of
+magnitude of porting an entire new Linux driver subsystem (DAL is
+~100 K LOC), which is why "Vega 56 / Raven / Navi" tickets are the
+consistent "not happening soon" category.
+
+This driver fork (`KevinAdams05/RadeonHDunofficial`) is
+firmly in the middle box — DCE-era, AtomBIOS-driven, R600 through
+Polaris. We are excluding DCN cards from this driver, a message will get logged to syslog and Haiku should fall back to the framebuffer driver.
 
 ## The driver boundaries (technically)
 
@@ -66,10 +82,6 @@ is built around a DCE-version dispatch table that doesn't exist for
 those chips. They share a name and a vendor, but architecturally
 they're two separate drivers.
 
-This is why bugs like [#8082] (RS690M X1200), [#8436] (mixed pre-R600
-list), and [#17330] (RS690MC Radeon Xpress 1200) are in the "hardware
-too old for radeon_hd" bucket — the chips predate the architecture
-`radeon_hd` was built around.
 
 ### Cliff 2 — DCE 12 → DCN 1.0 (2017)
 
@@ -118,34 +130,6 @@ This is **inside `radeon_hd`'s coverage**, just requires DCE-version
 dispatch in the driver's logic. Not architectural — it's just version
 compatibility.
 
-## The full Haiku picture
-
-```
-~2000           ~2007          ~2013         ~2017          ~present
-  │               │              │             │              │
-  │   radeon ─────┤              │             │              │
-  │   (R100–R500) │              │             │              │
-  │               │              │             │              │
-  │               ├── radeon_hd ─┼─────────────┤              │
-  │               │  DCE 1.0 → DCE 6           │              │
-  │               │              │  DCE 8 → DCE 12             │
-  │               │              │             │              │
-  │               │              │             ├── radeon_dcn ┤
-  │               │              │             │  DCN 1 → DCN 3+
-  │               │              │             │              │
-```
-
-Haiku currently has the first two boxes (`radeon` and `radeon_hd`).
-The third doesn't exist — and porting it is a project on the order of
-magnitude of porting an entire new Linux driver subsystem (DAL is
-~100 K LOC), which is why "Vega 56 / Raven / Navi" tickets are the
-consistent "not happening soon" category.
-
-The fork you're working on (`KevinAdams05/RadeonHDunofficial`) is
-firmly in the middle box — DCE-era, AtomBIOS-driven, R600 through
-Polaris. That's a tractable chip range covering ~10 years of cards
-(~2007–2017), which is a reasonable scope for one-person hobby driver
-work.
 
 ## DCE version → chip family quick reference
 
@@ -260,25 +244,6 @@ when you need historical/origin context on DC and DCN.
 | https://www.x.org/wiki/Events/XDC2017/ | XDC 2017 program — Harry Wentland's "DC: Display Core Next" talk. Slides linked from program. |
 | https://www.phoronix.com — search "AMDGPU DC mainline 4.15" | Phoronix coverage of DC's December 2017 merge into Linux 4.15. Multiple articles. Journalism-grade for forum/ticket comments. |
 
-
-### Things to avoid asserting without a primary source
-
-A few framings I've used in chat that *aren't* in any single
-authoritative source word-for-word — be careful citing these as if
-AMD said them:
-
-- **"DCN bypasses AtomBIOS"** — true and observable from contrasting
-  the source trees, but no AMD doc says this in those words. If
-  pressed, point to the absence of `atombios_*` calls in
-  `drivers/gpu/drm/amd/display/dc/` versus their presence in
-  `drivers/gpu/drm/radeon/`.
-- **"R500 → R600 cliff in 2007"** — chip launch dates are factual
-  (Wikipedia / AMD product pages), but calling it an "architectural
-  cliff" is editorial.
-- **"DCN driver is roughly 100 K LOC"** — order of magnitude correct
-  (`drivers/gpu/drm/amd/display/dc` is large), but for an exact
-  claim, run `cloc` against the directory and quote the result with
-  date.
 
 ### Notes on link rot and gating
 
