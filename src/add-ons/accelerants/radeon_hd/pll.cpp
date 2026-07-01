@@ -803,6 +803,24 @@ pll_set(display_mode* mode, uint8 crtcID)
 	pll_compute(pll);
 		// compute dividers and spread spectrum
 
+	// pll_compute() rewrote pll->pixelClock to the clock its dividers actually
+	// produce. For DisplayPort that target is the AdjustDisplayPll link
+	// frequency (DispPllFreq), not the pixel rate: pll_adjust() feeds the DP
+	// link rate into AdjustDisplayPll, so pll->adjustedClock -- and hence the
+	// recomputed pll->pixelClock -- is link-derived (e.g. ~99900 kHz for a
+	// 154000 kHz mode). The CRTC pixel clock on DP is produced by the DP DTO
+	// from the SetPixelClock pixel-clock field, so that field must carry the
+	// real mode clock or the panel scans out at the wrong rate ("out of
+	// range"). Restore it here for DP; the PLL dividers stay as pll_compute()
+	// set them. Mirrors Linux atombios_crtc_set_pll(), which passes mode->clock
+	// to the SetPixelClock table while computing dividers from the adjusted
+	// clock. TMDS paths (DVI/HDMI, including the 4:2:0 half-clock case) keep the
+	// computed value, which is the correct pixel clock there.
+	if (encoderMode == ATOM_ENCODER_MODE_DP
+		|| encoderMode == ATOM_ENCODER_MODE_DP_MST) {
+		pll->pixelClock = mode->timing.pixel_clock;
+	}
+
 	uint8 tableMajor;
 	uint8 tableMinor;
 

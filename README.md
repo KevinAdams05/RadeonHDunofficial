@@ -29,10 +29,11 @@ Tested on Haiku hrev59697.
 | AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ |
 | AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ➖ | ✅ | ➖ | ✅ |
 | Sapphire | Radeon HD 6850 | `0x6739` | Northern Islands | Barts PRO | ➖ | ✅ | ✅ | ✅ |
+| MSI | Radeon R7 260X / 360 | `0x6658` | Sea Islands | Bonaire XTX | ➖ | ✅ | ✅ | ✅ |
 
 
 ### Notes
-
+- **4K DVI not tested** - my only 4K monitor does not have a DVI port, so I am unable to test 4K over DVI
 - **AX5450 (Cedar)** — 1080p@60Hz, 1600×1200, and 1024×768 over HDMI
   verified on 0.6.3 in **real HDMI encoder mode** — the magenta-stripe
   data-island bleed is fixed (root cause: the AFMT packet generator
@@ -66,6 +67,26 @@ Tested on Haiku hrev59697.
   encoder mode on this card's UNIPHY2-linkB→DIG5 topology (a different
   DIG than Cedar's, confirming the 0.6.3 DIG-routing fix is general);
   DP link trains clean at 270 MHz × 2 lanes.
+- **R7 260X / 360 (Bonaire XTX, MSI board)** — the **first Sea Islands / GCN 2.0
+  (CIK) part tested** in this fork; every card above is TeraScale
+  (Evergreen / Northern Islands). 4K@60Hz (3840×2160, 32 bpp) verified
+  over **HDMI** on the 0.6.4 development build — the driver loads Bonaire
+  registers (`init_registers … chipset Bonaire`) and drives the DCE4/5
+  CRTC path cleanly; the display is correctly flagged attached and the
+  mode survives to the desktop. 4K@60 over HDMI 1.4 runs via **4:2:0
+  chroma subsampling** — the driver halves the TMDS clock (533 → 266 MHz)
+  to stay under the HDMI 1.4a ceiling. **DisplayPort now works too**
+  (1920×1200@60 verified) after fixing two Sea-Islands-specific driver
+  bugs: (1) the DCE8 HPD-id lookup used a dword register index where a
+  byte offset was expected (`SEA_mmDC_GPIO_HPD_A`), so every DP AUX
+  transaction was issued with `HPD_NONE` and failed with "flags not
+  zero" — no EDID, framebuffer fallback; (2) the DP CRTC pixel clock was
+  programmed from the AdjustDisplayPll *link* frequency instead of the
+  real mode clock, scanning the panel out below its refresh range
+  ("out of range"). **DVI-I** also verified (1920×1080@60 over single-link
+  TMDS; uses a normal PPLL, unaffected by the DP clock fix).
+  **Note:** this card needs a PCIe aux-power cable — with it unplugged
+  the card does not POST and does not even enumerate on the PCI bus.
 
 [8765]: https://dev.haiku-os.org/ticket/8765
 
