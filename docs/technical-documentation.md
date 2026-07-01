@@ -61,8 +61,8 @@ This document is the consolidated technical reference for the RadeonHD
 | **R700** | 3.0 / 3.2 | RV710, RV730, RV740, RV770 | **NEED:** HD 4670 (direct match for [#8457] [#15125]). Optional: HD 4350/4550 , HD 4870  | — | — |
 | Evergreen | 4.x | Cedar, Redwood, Juniper, Cypress | **✅ HD 5450 (`0x68f9`, Cedar).** NEXT: HD 5770 (Juniper) or HD 5870 (Cypress), HD 5670 (Redwood XT — to reproduce [#19934]) | — | 0.1.0, 0.2.0, 0.3.0, 0.4.0 |
 | Northern Islands | 5.x | Caicos, Turks, Barts, Cayman | **✅ HD 7470/8470 OEM (`0x6778`, Caicos XT).** **✅ HD 6570/7570/8550/R5 230 (`0x6759`, Turks PRO).** **✅ HD 6850 (`0x6739`, Barts PRO)** Need: HD 6950 (Cayman) | — | 0.3.0, 0.4.0 (Caicos cap), 0.5.0 (Turks cap), 0.6.1 (Barts re-enable), 0.6.2 (Barts cap) |
-| Southern Islands | 6.x | Cape Verde, Pitcairn, Tahiti, **Aruba (APU)** | HD 7770 (Cape Verde), HD 7870 (Pitcairn), or HD 7970 (Tahiti) | A10-5800K / A8-5600K (Trinity) **or** A10-6800K / A8-6600K (Richland) on Socket FM2  | 0.3.0, 0.4.0 |
-| Sea Islands | 8.x | Bonaire, Hawaii, **Kaveri/Kabini/Mullins (APU)** | **✅ R7 260X / 360 (`0x6658`, Bonaire XTX, MSI board) — 4K@60 over HDMI (first GCN/CIK part tested).** Need: R9 290/290X (Hawaii) | A10-7860K / A10-7850K (Kaveri, Socket FM2+), Athlon 5350 / Sempron 3850 (Kabini, Socket AM1), or any Mullins laptop (e.g. A4 Micro-6400T) | 0.3.0, 0.4.0, 0.6.4 (Bonaire verified) |
+| Southern Islands | 6.x | Cape Verde, Pitcairn, Tahiti, **Aruba (APU)** | **✅ HD 7770 / R7 250X (`0x683d`, Cape Verde XT, MSI board) — DVI-I + HDMI + DisplayPort at 1920×1200@60 (first SI/DCE6 part tested; DP HPD path `SI_DC_GPIO_HPD_A` already correct, DP clock fix applies). HDMI tops out at 1920×1200 here — no 4K@60 (HDMI 1.4, 340 MHz cap; see the HDMI note).** Need: HD 7870 (Pitcairn), HD 7970 (Tahiti) | A10-5800K / A8-5600K (Trinity) **or** A10-6800K / A8-6600K (Richland) on Socket FM2  | 0.3.0, 0.4.0, 0.6.4 (Cape Verde verified) |
+| Sea Islands | 8.x | Bonaire, Hawaii, **Kaveri/Kabini/Mullins (APU)** | **✅ R7 260X / 360 (`0x6658`, Bonaire XTX, MSI board) — first GCN/CIK part tested; HDMI + DisplayPort verified. (A pre-release build briefly showed 4K@60 over HDMI via AtomBIOS 4:2:0 halving; the shipping driver caps HDMI at 340 MHz like Linux, so 4K@60 is a DisplayPort mode — see the HDMI note.)** Need: R9 290/290X (Hawaii) | A10-7860K / A10-7850K (Kaveri, Socket FM2+), Athlon 5350 / Sempron 3850 (Kabini, Socket AM1), or any Mullins laptop (e.g. A4 Micro-6400T) | 0.3.0, 0.4.0, 0.6.4 (Bonaire verified) |
 | Volcanic Islands | 10.0 / 11.0 / 11.1 | Tonga, Fiji, **Carrizo (APU)**, **Stoney (APU)** | R9 285 (Tonga), R9 Fury (Fiji) | Carrizo laptop: FX-8800P, A10-8700P, A8-8600P. Stoney laptop: A9-9410, A6-9220, E2-9000. | 0.3.0, 0.4.0 |
 | Polaris | 11.2 | Polaris10, Polaris11, Polaris12, Polaris22 | **RX 580** / RX 590 (Polaris10), RX 460 / RX 560 (Polaris11), or RX 540 / RX 550 (Polaris12) | — | 0.3.0, 0.4.0 |
 
@@ -312,6 +312,19 @@ Added pixel clock validation that enforces:
 
 Modes exceeding the limit are now rejected by `is_mode_supported()` before
 they ever reach the PLL programming path.
+
+**Why there is no 4K@60 over HDMI on any card this driver supports.**
+Full-RGB 4K@60 is a ~594 MHz TMDS clock, which requires HDMI 2.0. Every GPU
+in scope here is HDMI 1.4a, whose transmitter caps at 340 MHz — a limit of
+the GPU silicon, not the cable (HDMI cables have no version; any High Speed
+cable already carries more than 340 MHz). The only way to fit 4K@60 into
+HDMI 1.4 is YCbCr **4:2:0**, which halves the chroma data to ~266 MHz. That
+is an `amdgpu`/DC-era feature; the old Linux `radeon` driver never
+implemented it, and neither does this fork. The 340 MHz cap above therefore
+matches Linux `radeon` exactly — `radeon_dvi_mode_valid()` returns
+`MODE_CLOCK_HIGH` for HDMI modes over 340 MHz on DCE6+ and has no 4:2:0
+path. Full-RGB 4K@60 on these cards is a **DisplayPort** capability
+(DP 1.2/HBR2 has the bandwidth), not an HDMI one.
 
 ![Pixel Clock Validation Flow](../diagrams/pixel-clock-validation.svg)
 

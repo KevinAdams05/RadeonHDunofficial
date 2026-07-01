@@ -29,10 +29,24 @@ Tested on Haiku hrev59697.
 | AMD OEM | Radeon HD 7470 / 8470 (OEM rebrand) | `0x6778` | Northern Islands | Caicos XT | ➖ | ✅ | ➖ | ✅ |
 | AMD OEM | Radeon HD 6570 / 7570 / 8550 / R5 230 (OEM rebrand) | `0x6759` | Northern Islands | Turks PRO | ➖ | ✅ | ➖ | ✅ |
 | Sapphire | Radeon HD 6850 | `0x6739` | Northern Islands | Barts PRO | ➖ | ✅ | ✅ | ✅ |
+| MSI | Radeon HD 7770 / 8760 / R7 250X | `0x683d` | Southern Islands | Cape Verde XT | ➖ | ✅ | ✅ | ✅ |
 | MSI | Radeon R7 260X / 360 | `0x6658` | Sea Islands | Bonaire XTX | ➖ | ✅ | ✅ | ✅ |
 
 
 ### Notes
+- **4K@60 over HDMI needs an HDMI 2.0 card — none of these qualify.**
+  Full-RGB 4K@60 over HDMI requires a ~594 MHz TMDS clock (HDMI 2.0).
+  Every card in the table above is HDMI 1.4a, whose transmitter tops out
+  at **340 MHz** — a limit of the GPU silicon, not the cable (HDMI cables
+  carry no "version"; any *High Speed* cable already exceeds 340 MHz). The
+  only way to fit 4K@60 into HDMI 1.4 is YCbCr **4:2:0**, which halves the
+  chroma data to ~266 MHz — an `amdgpu`/DC-era feature the old Linux
+  `radeon` driver never implemented, and neither does this fork. So the
+  driver caps HDMI at 340 MHz, exactly matching Linux `radeon`
+  (`radeon_dvi_mode_valid` returns `MODE_CLOCK_HIGH` above 340 MHz on
+  DCE6+ and has no 4:2:0 fallback). For full-RGB 4K@60 on these cards use
+  **DisplayPort** (DP 1.2/HBR2 has the bandwidth); over HDMI, 4K@60 needs
+  a newer HDMI-2.0 card.
 - **4K DVI not tested** - my only 4K monitor does not have a DVI port, so I am unable to test 4K over DVI
 - **AX5450 (Cedar)** — 1080p@60Hz, 1600×1200, and 1024×768 over HDMI
   verified on 0.6.3 in **real HDMI encoder mode** — the magenta-stripe
@@ -69,13 +83,14 @@ Tested on Haiku hrev59697.
   DP link trains clean at 270 MHz × 2 lanes.
 - **R7 260X / 360 (Bonaire XTX, MSI board)** — the **first Sea Islands / GCN 2.0
   (CIK) part tested** in this fork; every card above is TeraScale
-  (Evergreen / Northern Islands). 4K@60Hz (3840×2160, 32 bpp) verified
-  over **HDMI** on the 0.6.4 development build — the driver loads Bonaire
-  registers (`init_registers … chipset Bonaire`) and drives the DCE4/5
-  CRTC path cleanly; the display is correctly flagged attached and the
-  mode survives to the desktop. 4K@60 over HDMI 1.4 runs via **4:2:0
-  chroma subsampling** — the driver halves the TMDS clock (533 → 266 MHz)
-  to stay under the HDMI 1.4a ceiling. **DisplayPort now works too**
+  (Evergreen / Northern Islands). The driver loads Bonaire registers
+  (`init_registers … chipset Bonaire`) and drives the DCE CRTC path
+  cleanly. A **pre-release** 0.6.4 build briefly showed 4K@60 over HDMI —
+  the mode slipped past validation and AtomBIOS 4:2:0-halved the TMDS
+  clock (533 → 266 MHz) to fit under the HDMI 1.4a ceiling — but the
+  shipping driver caps HDMI at 340 MHz to match Linux `radeon` (see the
+  *4K@60 over HDMI* note above), so 4K@60 on Bonaire is a **DisplayPort**
+  mode, not HDMI. **DisplayPort now works too**
   (1920×1200@60 verified) after fixing two Sea-Islands-specific driver
   bugs: (1) the DCE8 HPD-id lookup used a dword register index where a
   byte offset was expected (`SEA_mmDC_GPIO_HPD_A`), so every DP AUX
