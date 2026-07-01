@@ -264,7 +264,7 @@ dp_aux_get_i2c_byte(uint32 connectorIndex, uint32 address, uint8* data,
 	for (int attempt = 0; attempt < 7; attempt++) {
 		status_t result = dp_aux_transaction(connectorIndex, &message);
 		if (result != B_OK) {
-			ERROR("%s: aux_ch transaction failed!\n", __func__); 
+			ERROR("%s: aux_ch transaction failed!\n", __func__);
 			return result;
 		}
 
@@ -310,7 +310,7 @@ dp_aux_set_i2c_byte(uint32 connectorIndex, uint32 address, uint8* data,
 	for (int attempt = 0; attempt < 7; attempt++) {
 		status_t result = dp_aux_transaction(connectorIndex, &message);
 		if (result != B_OK) {
-			ERROR("%s: aux_ch transaction failed!\n", __func__); 
+			ERROR("%s: aux_ch transaction failed!\n", __func__);
 			return result;
 		}
 		switch (message.reply & DP_AUX_I2C_REPLY_MASK) {

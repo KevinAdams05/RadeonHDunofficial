@@ -681,13 +681,6 @@ pll_adjust(pll_info* pll, display_mode* mode, uint8 crtcID)
 								= B_HOST_TO_LENDIAN_INT16(dpLinkSpeed / 10);
 						} else if ((connectorFlags & ATOM_DEVICE_DFP_SUPPORT)
 							!= 0) {
-							#if 0
-							if (encoderMode == ATOM_ENCODER_MODE_HDMI) {
-								/* deep color support */
-								args.v3.sInput.usPixelClock =
-									cpu_to_le16((mode->clock * bpc / 8) / 10);
-							}
-							#endif
 							if (pixelClock > 165000) {
 								args.v3.sInput.ucDispPllConfig
 									|= DISPPLL_CONFIG_DUAL_LINK;
@@ -814,12 +807,11 @@ pll_set(display_mode* mode, uint8 crtcID)
 	// range"). Restore it here for DP; the PLL dividers stay as pll_compute()
 	// set them. Mirrors Linux atombios_crtc_set_pll(), which passes mode->clock
 	// to the SetPixelClock table while computing dividers from the adjusted
-	// clock. TMDS paths (DVI/HDMI, including the 4:2:0 half-clock case) keep the
-	// computed value, which is the correct pixel clock there.
+	// clock. TMDS paths (DVI/HDMI, including the 4:2:0 half-clock case) keep
+	// the computed value, which is the correct pixel clock there.
 	if (encoderMode == ATOM_ENCODER_MODE_DP
-		|| encoderMode == ATOM_ENCODER_MODE_DP_MST) {
+		|| encoderMode == ATOM_ENCODER_MODE_DP_MST)
 		pll->pixelClock = mode->timing.pixel_clock;
-	}
 
 	uint8 tableMajor;
 	uint8 tableMinor;

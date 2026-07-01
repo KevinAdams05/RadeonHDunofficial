@@ -167,7 +167,7 @@ radeon_dpms_set(uint8 id, int mode)
 void
 radeon_dpms_set_hook(int mode)
 {
-	// TODO: multi-monitor? 
+	// TODO: multi-monitor?
 
 	uint8 crtcID = 0;
 

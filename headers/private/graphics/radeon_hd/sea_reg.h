@@ -36,6 +36,6 @@
  * id resolved to 0xff (HPD_NONE) and DisplayPort AUX transactions failed with
  * "flags not zero". Express it as the byte offset like its siblings: it is the
  * same physical register as SI (0x196d * 4 == 0x65b4). */
-#define SEA_mmDC_GPIO_HPD_A                                                         0x65b4
+#define SEA_mmDC_GPIO_HPD_A		0x65b4
 
 #endif /* DCE_8_0_D_H */
