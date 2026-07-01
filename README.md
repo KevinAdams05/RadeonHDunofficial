@@ -34,76 +34,32 @@ Tested on Haiku hrev59697.
 
 
 ### Notes
-- **4K@60 over HDMI needs an HDMI 2.0 card — none of these qualify.**
+- **HDMI resolution is capped.**
   Full-RGB 4K@60 over HDMI requires a ~594 MHz TMDS clock (HDMI 2.0).
   Every card in the table above is HDMI 1.4a, whose transmitter tops out
-  at **340 MHz** — a limit of the GPU silicon, not the cable (HDMI cables
-  carry no "version"; any *High Speed* cable already exceeds 340 MHz). The
-  only way to fit 4K@60 into HDMI 1.4 is YCbCr **4:2:0**, which halves the
-  chroma data to ~266 MHz — an `amdgpu`/DC-era feature the old Linux
-  `radeon` driver never implemented, and neither does this fork. So the
-  driver caps HDMI at 340 MHz, exactly matching Linux `radeon`
-  (`radeon_dvi_mode_valid` returns `MODE_CLOCK_HIGH` above 340 MHz on
-  DCE6+ and has no 4:2:0 fallback). For full-RGB 4K@60 on these cards use
-  **DisplayPort** (DP 1.2/HBR2 has the bandwidth); over HDMI, 4K@60 needs
-  a newer HDMI-2.0 card.
-- **4K DVI not tested** - my only 4K monitor does not have a DVI port, so I am unable to test 4K over DVI
+  at 340 MHz this is a limit of the GPU, not the cable. The
+  only way to fit 4K@60 into HDMI 1.4 is YCbCr 4:2:0, which halves the
+  chroma data to ~266 MHz. We are not doing this, and the
+  driver caps HDMI at 340 MHz, matching Linux driver.
+  For full-RGB 4K@60 on these cards use  **DisplayPort**  not HDMI.
+- **DVI capped at 1920x1200@60Hz** - my only 4K monitor does not have a DVI port, so I am unable to test 4K over DVI. DVI-I only supports 165Mhz anyways (which is 1920x160@60Hz). DVI-D can support 4K, which is probably present on some of the later cards, but I don't have a monitor to test with.
 - **AX5450 (Cedar)** — 1080p@60Hz, 1600×1200, and 1024×768 over HDMI
-  verified on 0.6.3 in **real HDMI encoder mode** — the magenta-stripe
-  data-island bleed is fixed (root cause: the AFMT packet generator
-  was programmed on the wrong DIG instance; see the 0.6.3 section in
-  [`docs/technical-documentation.md`](docs/technical-documentation.md)).
-  The 0.2.0 DVI fallback is retired. DPMS off→on cycle verified —
-  colors and infoframe state survive a monitor power-down (the AFMT
-  block is preserved across the AtomBIOS DPMS sequence on Cedar).
-  VGA and DVI outputs also verified on 0.6.3.
+  verified.  VGA and DVI outputs also verified.
 - **HD 7470 / 8470 (Caicos XT)** — 1080p@60Hz on DisplayPort and
-  DVI-D Single Link, cold-boot verified. Higher modes including
+  DVI-D Single Link. Higher modes including
   4K@60Hz are capped at 165 MHz pixel clock due to memory-bandwidth
-  limits of the linear-scanout path on this 64-bit-bus chip (see
-  0.4.0).
+  limits.
 - **HD 6570 / 7570 / 8550 / R5 230 (Turks PRO)** — 1080p@60Hz on DVI-I
-  and DisplayPort re-verified on 0.6.3 (DP link trains clean at
-  270 MHz × 2 lanes). The 128-bit memory bus tolerates higher
-  pixel clocks than Caicos's 64-bit (1680×1680 @ 240 MHz scans clean)
-  but still not 4K@60Hz. Capped at 250 MHz (see 0.5.0). Known
-  cosmetic issue: probing the *unconnected* second DP port logs
-  harmless `dp_aux` timeout noise at boot (see `docs/TODO.md`).
+  and DisplayPort verified on 0.6.3 (DP link trains clean at
+  270 MHz × 2 lanes). Supports higher output, but still not 4K@60Hz. Capped at 250 MHz.
 - **HD 6850 (Barts PRO)** — 1080p@60Hz verified on DVI-I,
-  HDMI A, DisplayPort, and the second DVI-I port. This card was
-  previously gated out of the driver entirely via an `#if 0` block in
-  `driver.cpp` carrying a stale "Not working: #8765" comment from
-  Haiku Trac ticket [#8765][8765] (filed 14 years ago against
-  hrev44378 — black on DVI, vertical stripes on VGA). The block was
-  removed in 0.6.1. 4K@60Hz over DisplayPort (533 MHz pixel clock) produced scanout corruption. Added a pixel cap @ 340 MHz in 0.6.2 (matching the card's
-  native HDMI 1.4a ceiling). Will try to fix that (or determine true highest resolution) in the next version.
-  DVI, HDMI, and DP all re-verified on 0.6.3 — HDMI now in real HDMI
-  encoder mode on this card's UNIPHY2-linkB→DIG5 topology (a different
-  DIG than Cedar's, confirming the 0.6.3 DIG-routing fix is general);
-  DP link trains clean at 270 MHz × 2 lanes.
-- **R7 260X / 360 (Bonaire XTX, MSI board)** — the **first Sea Islands / GCN 2.0
-  (CIK) part tested** in this fork; every card above is TeraScale
-  (Evergreen / Northern Islands). The driver loads Bonaire registers
-  (`init_registers … chipset Bonaire`) and drives the DCE CRTC path
-  cleanly. A **pre-release** 0.6.4 build briefly showed 4K@60 over HDMI —
-  the mode slipped past validation and AtomBIOS 4:2:0-halved the TMDS
-  clock (533 → 266 MHz) to fit under the HDMI 1.4a ceiling — but the
-  shipping driver caps HDMI at 340 MHz to match Linux `radeon` (see the
-  *4K@60 over HDMI* note above), so 4K@60 on Bonaire is a **DisplayPort**
-  mode, not HDMI. **DisplayPort now works too**
-  (1920×1200@60 verified) after fixing two Sea-Islands-specific driver
-  bugs: (1) the DCE8 HPD-id lookup used a dword register index where a
-  byte offset was expected (`SEA_mmDC_GPIO_HPD_A`), so every DP AUX
-  transaction was issued with `HPD_NONE` and failed with "flags not
-  zero" — no EDID, framebuffer fallback; (2) the DP CRTC pixel clock was
-  programmed from the AdjustDisplayPll *link* frequency instead of the
-  real mode clock, scanning the panel out below its refresh range
-  ("out of range"). **DVI-I** also verified (1920×1080@60 over single-link
-  TMDS; uses a normal PPLL, unaffected by the DP clock fix).
-  **Note:** this card needs a PCIe aux-power cable — with it unplugged
-  the card does not POST and does not even enumerate on the PCI bus.
+  HDMI A, DisplayPort, and the second DVI-I port. 4K@60Hz over DisplayPort (533 MHz pixel clock) produced scanout corruption. Added a pixel cap @ 340 MHz. 
+  DVI, HDMI, and DP all verified. HDMI now in real HDMI
+  encoder mode.
+- **R7 260X / 360 (Bonaire XTX)** The
+  driver caps HDMI at 340 MHz to match Linux `radeon`, so 4K@60 on Bonaire is a **DisplayPort**
+  mode, not HDMI.
 
-[8765]: https://dev.haiku-os.org/ticket/8765
 
 ---
 
@@ -190,6 +146,7 @@ for the changelog-format release notes see
 | [0.6.1](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#061--hd-6850-barts-re-enabled) | 2025-05-27 | Re-enabled Radeon HD 6850 (0x6739) |
 | [0.6.2](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#062--barts-pixel-clock-cap) | 2025-05-27 |  Radeon HD 6850: 4K@60hz is not working yet, added a pixel cap for now. |
 | [0.6.3](docs/fixes-by-version.md#063--hdmi-magenta-stripe-root-cause-fixed-dcn-guard-kernel-hardening) | 2026-06-04 | HDMI magenta stripe fixed. DVI fallback retired, real HDMI mode on DCE4+. DCN GPUs refused gracefully with framebuffer fallback, PCI BAR-assignment guard, etc... |
+| [0.6.4](docs/fixes-by-version.md#064--displayport-fixes-and-cape-verde-dce6-support) | 2026-07-01 | DisplayPort fixed on Sea Islands (HPD-id dword/byte) and all DCE (pixel clock); first Southern Islands / DCE6 part (Cape Verde) verified on DVI/HDMI/DP; HDMI 4K limitation documented |
 ---
 
 

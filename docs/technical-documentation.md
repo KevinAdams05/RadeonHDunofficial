@@ -55,14 +55,14 @@ This document is the consolidated technical reference for the RadeonHD
 
 ## Hardware Generations Affected
 
-| Generation | DCE | Codename Examples | Potential Test GPU | Potential Test CPU (APU) | Versions |
+| Generation | DCE | Codename Examples | Test GPU | Test CPU (APU) | Versions |
 |------------|-----|-------------------|--------------------|--------------------------|----------|
 | **R600** | 1.0 / 2.0 | R600, RV610, RV620, RV630, RV635, RV670, RS780/RS880 (IGP) | **NEED:** HD 2400 PRO **and** HD 3450 (direct match for [#11242] [#11907] [#19166]). Optional: HD 2600 (RV630, [#12970] [#12642]) | — | — |
 | **R700** | 3.0 / 3.2 | RV710, RV730, RV740, RV770 | **NEED:** HD 4670 (direct match for [#8457] [#15125]). Optional: HD 4350/4550 , HD 4870  | — | — |
 | Evergreen | 4.x | Cedar, Redwood, Juniper, Cypress | **✅ HD 5450 (`0x68f9`, Cedar).** NEXT: HD 5770 (Juniper) or HD 5870 (Cypress), HD 5670 (Redwood XT — to reproduce [#19934]) | — | 0.1.0, 0.2.0, 0.3.0, 0.4.0 |
 | Northern Islands | 5.x | Caicos, Turks, Barts, Cayman | **✅ HD 7470/8470 OEM (`0x6778`, Caicos XT).** **✅ HD 6570/7570/8550/R5 230 (`0x6759`, Turks PRO).** **✅ HD 6850 (`0x6739`, Barts PRO)** Need: HD 6950 (Cayman) | — | 0.3.0, 0.4.0 (Caicos cap), 0.5.0 (Turks cap), 0.6.1 (Barts re-enable), 0.6.2 (Barts cap) |
-| Southern Islands | 6.x | Cape Verde, Pitcairn, Tahiti, **Aruba (APU)** | **✅ HD 7770 / R7 250X (`0x683d`, Cape Verde XT, MSI board) — DVI-I + HDMI + DisplayPort at 1920×1200@60 (first SI/DCE6 part tested; DP HPD path `SI_DC_GPIO_HPD_A` already correct, DP clock fix applies). HDMI tops out at 1920×1200 here — no 4K@60 (HDMI 1.4, 340 MHz cap; see the HDMI note).** Need: HD 7870 (Pitcairn), HD 7970 (Tahiti) | A10-5800K / A8-5600K (Trinity) **or** A10-6800K / A8-6600K (Richland) on Socket FM2  | 0.3.0, 0.4.0, 0.6.4 (Cape Verde verified) |
-| Sea Islands | 8.x | Bonaire, Hawaii, **Kaveri/Kabini/Mullins (APU)** | **✅ R7 260X / 360 (`0x6658`, Bonaire XTX, MSI board) — first GCN/CIK part tested; HDMI + DisplayPort verified. (A pre-release build briefly showed 4K@60 over HDMI via AtomBIOS 4:2:0 halving; the shipping driver caps HDMI at 340 MHz like Linux, so 4K@60 is a DisplayPort mode — see the HDMI note.)** Need: R9 290/290X (Hawaii) | A10-7860K / A10-7850K (Kaveri, Socket FM2+), Athlon 5350 / Sempron 3850 (Kabini, Socket AM1), or any Mullins laptop (e.g. A4 Micro-6400T) | 0.3.0, 0.4.0, 0.6.4 (Bonaire verified) |
+| Southern Islands | 6.x | Cape Verde, Pitcairn, Tahiti, **Aruba (APU)** | **✅ HD 7770 / R7 250X (`0x683d`, Cape Verde XT) — DVI-I + HDMI + DisplayPort at 1920×1200@60. HDMI tops out at 1920×1200 - no 4K@60 (HDMI 1.4, 340 MHz cap; see the HDMI note).** Need: HD 7870 (Pitcairn), HD 7970 (Tahiti) | A10-5800K / A8-5600K (Trinity) **or** A10-6800K / A8-6600K (Richland) on Socket FM2  | 0.3.0, 0.4.0, 0.6.4 (Cape Verde verified) |
+| Sea Islands | 8.x | Bonaire, Hawaii, **Kaveri/Kabini/Mullins (APU)** | **✅ R7 260X / 360 (`0x6658`, Bonaire XTX) HDMI + DVI + DisplayPort verified. (Driver caps HDMI at 340 MHz like Linux)** Need: R9 290/290X (Hawaii) | A10-7860K / A10-7850K (Kaveri, Socket FM2+), Athlon 5350 / Sempron 3850 (Kabini, Socket AM1), or any Mullins laptop (e.g. A4 Micro-6400T) | 0.3.0, 0.4.0, 0.6.4 (Bonaire verified) |
 | Volcanic Islands | 10.0 / 11.0 / 11.1 | Tonga, Fiji, **Carrizo (APU)**, **Stoney (APU)** | R9 285 (Tonga), R9 Fury (Fiji) | Carrizo laptop: FX-8800P, A10-8700P, A8-8600P. Stoney laptop: A9-9410, A6-9220, E2-9000. | 0.3.0, 0.4.0 |
 | Polaris | 11.2 | Polaris10, Polaris11, Polaris12, Polaris22 | **RX 580** / RX 590 (Polaris10), RX 460 / RX 560 (Polaris11), or RX 540 / RX 550 (Polaris12) | — | 0.3.0, 0.4.0 |
 
@@ -2073,30 +2073,31 @@ This first table lists only the tickets we believe our fixes **resolve**. "Resol
 
 ### Kernel Driver — `src/add-ons/kernel/drivers/graphics/radeon_hd/`
 
-| File | 0.1.0 | 0.3.0 | Description |
-|------|:-----:|:-----:|-------------|
-| `driver.cpp` | ✅ | ✅ | PCI ID table: Cedar corrections (0.1.0); Kaveri/Kabini/Mullins `CHIP_STD` → `CHIP_APU`, 58 entries (0.3.0) |
-| `radeon_hd.cpp` | — | ✅ | APU check inside the Tahiti+ VRAM-detection branch (0.3.0) |
+| File | 0.1.0 | 0.3.0 | 0.6.1 | 0.6.3 | Description |
+|------|:-----:|:-----:|:-----:|:-----:|-------------|
+| `driver.cpp` | ✅ | ✅ | ✅ | ✅ | PCI ID table: Cedar corrections (0.1.0); Kaveri/Kabini/Mullins `CHIP_STD` → `CHIP_APU`, 58 entries (0.3.0); HD 6850 (Barts) `#if 0` gate removed (0.6.1); kernel hardening / DCN guard / instrumentation (0.6.3) |
+| `radeon_hd.cpp` | — | ✅ | — | ✅ | APU check inside the Tahiti+ VRAM-detection branch (0.3.0); kernel hardening / DCN guard (0.6.3) |
 
 ### Accelerant — `src/add-ons/accelerants/radeon_hd/`
 
-| File | 0.1.0 | 0.2.0 | 0.3.0 | 0.4.0 | 0.5.0 | 0.6.0 | Description |
-|------|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|-------------|
-| `display.cpp` | ✅ | ✅ | ✅ | ✅ | — | — | HDMI encoder mode (0.1.0, then 0.2.0 conservative DVI fallback); spread spectrum V2/V3 constants (0.3.0); EDID range descriptor sanity (0.4.0); forced linear `ARRAY_MODE` for Evergreen+ scanout (0.4.0) |
-| `displayport.cpp` | — | — | ✅ | — | — | ✅ | HBR2 enabled, link training return-value checks, retry-with-rate-fallback (0.3.0); speculative big-endian TODO comments clarified (0.6.0, no runtime change) |
-| `encoder.cpp` | — | — | ✅ | — | — | — | eDP power on/off, DP receiver D3 sleep, Travis bridge quirk, IGP lane comment (0.3.0) |
-| `gpu.cpp` | ✅ | — | — | — | — | — | Evergreen-specific MC halt/resume (0.1.0) |
-| `gpu.h` | ✅ | — | — | — | — | — | Function declarations for the Evergreen path (0.1.0) |
-| `hdmi.cpp`, `hdmi.h` | — | — | — | — | — | ✅ | New AVI infoframe builder + AFMT register packing (0.6.0, currently dormant — call site disabled pending magenta-stripe investigation) |
-| `mode.cpp` | ✅ | — | — | ✅ | ✅ | — | Pixel clock validation per connector type (0.1.0); underflow-safe EDID range comparison + diagnostic TRACE (0.4.0); Caicos pixel-clock cap at 165 MHz (0.4.0); cap framework generalized + Turks 250 MHz cap + square-mode filter (0.5.0) |
-| `pll.cpp` | — | — | ✅ | — | — | ✅ | DCE 6.1 guard in `pll_pick()`, Polaris routing in `pll_external_init()`, SetPixelClock v1.7 fallback (0.3.0); unsupported-table-version log clarified (0.6.0, no runtime change) |
+| File | 0.1.0 | 0.2.0 | 0.3.0 | 0.4.0 | 0.5.0 | 0.6.0 | 0.6.2 | 0.6.3 | 0.6.4 | Description |
+|------|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|-------------|
+| `display.cpp` | ✅ | ✅ | ✅ | ✅ | — | — | — | ✅ | — | HDMI encoder mode (0.1.0, then 0.2.0 conservative DVI fallback); spread spectrum V2/V3 constants (0.3.0); EDID range descriptor sanity (0.4.0); forced linear `ARRAY_MODE` for Evergreen+ scanout (0.4.0); magenta-stripe root-cause — AFMT enabled per DIG instance, DVI fallback retired (0.6.3) |
+| `displayport.cpp` | — | — | ✅ | — | — | ✅ | — | — | — | HBR2 enabled, link training return-value checks, retry-with-rate-fallback (0.3.0); speculative big-endian TODO comments clarified (0.6.0, no runtime change) |
+| `encoder.cpp` | — | — | ✅ | — | — | — | — | — | — | eDP power on/off, DP receiver D3 sleep, Travis bridge quirk, IGP lane comment (0.3.0) |
+| `gpu.cpp` | ✅ | — | — | — | — | — | — | — | — | Evergreen-specific MC halt/resume (0.1.0) |
+| `gpu.h` | ✅ | — | — | — | — | — | — | — | — | Function declarations for the Evergreen path (0.1.0) |
+| `hdmi.cpp`, `hdmi.h` | — | — | — | — | — | ✅ | — | ✅ | — | New AVI infoframe builder + AFMT register packing (0.6.0, initially dormant); enabled at the root magenta-stripe fix — AFMT indexed by DIG instance rather than CRTC (0.6.3) |
+| `mode.cpp` | ✅ | — | — | ✅ | ✅ | — | ✅ | ✅ | — | Pixel clock validation per connector type (0.1.0); underflow-safe EDID range comparison + diagnostic TRACE (0.4.0); Caicos pixel-clock cap at 165 MHz (0.4.0); cap framework generalized + Turks 250 MHz cap + square-mode filter (0.5.0); Barts 340 MHz cap (0.6.2); AVI infoframe wired into the mode-set path (0.6.3) |
+| `pll.cpp` | — | — | ✅ | — | — | ✅ | — | — | ✅ | DCE 6.1 guard in `pll_pick()`, Polaris routing in `pll_external_init()`, SetPixelClock v1.7 fallback (0.3.0); unsupported-table-version log clarified (0.6.0, no runtime change); DisplayPort CRTC pixel clock uses the real mode clock instead of the AdjustDisplayPll link frequency (0.6.4) |
 
 ### Headers — `headers/private/graphics/radeon_hd/`
 
 | File | Versions | Description |
 |------|:--------:|-------------|
-| `evergreen_reg.h` | 0.1.0, 0.4.0, 0.6.0 | New register defines for Evergreen MC sequencing (0.1.0); `EVERGREEN_GRPH_ARRAY_MODE` macro and `LINEAR_GENERAL` / `LINEAR_ALIGNED` / `1D_TILED_THIN1` / `2D_TILED_THIN1` value constants (0.4.0); display bandwidth / line-buffer / priority register defines documented for future use — `DC_LB_MEMORY_SPLIT`, `PRIORITY_A/B_CNT`, `PIPE0_*`, `MC_SHARED_CHMAP` (0.4.0); AFMT_AVI_INFO0..3 and HDMI_* register defines for the AVI infoframe path (0.6.0) |
+| `evergreen_reg.h` | 0.1.0, 0.4.0, 0.6.0, 0.6.3 | New register defines for Evergreen MC sequencing (0.1.0); `EVERGREEN_GRPH_ARRAY_MODE` macro and `LINEAR_GENERAL` / `LINEAR_ALIGNED` / `1D_TILED_THIN1` / `2D_TILED_THIN1` value constants (0.4.0); display bandwidth / line-buffer / priority register defines documented for future use — `DC_LB_MEMORY_SPLIT`, `PRIORITY_A/B_CNT`, `PIPE0_*`, `MC_SHARED_CHMAP` (0.4.0); AFMT_AVI_INFO0..3 and HDMI_* register defines for the AVI infoframe path (0.6.0); AFMT/HDMI per-DIG offset defines corrected for the magenta-stripe root-cause fix (0.6.3) |
 | `ni_reg.h` | 0.4.0 | DCE 5+ `DPG_PIPE_*` register defines |
+| `sea_reg.h` | 0.6.4 | New file. `SEA_mmDC_GPIO_HPD_A` defined as a byte offset (`0x65b4`, the Sea Islands HPD_A GPIO register) so `connector_pick_atom_hpdid()` resolves a valid HPD id on DCE8 — was previously the raw AtomBIOS dword index, which never matched and left the HPD id at `HPD_NONE`, breaking DisplayPort AUX on Sea Islands |
 | `accelerant.h` | 0.1.0 | `evergreen_gpu_state` struct declaration |
 
 ---

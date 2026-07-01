@@ -184,3 +184,34 @@ Generalizes the per-chip cap framework and adds a second chip:
   dump to syslog (~45 lines total), so user-attached syslogs carry
   the state needed to diagnose encoder and scanout-arbitration
   issues remotely.
+
+
+## 0.6.4 — DisplayPort fixes and Cape Verde (DCE6) support
+
+*2026-07-01*
+
+- **DisplayPort now works on Sea Islands (DCE8).** The DCE8 HPD-id
+  lookup used AtomBIOS's raw dword register index for
+  `SEA_mmDC_GPIO_HPD_A` (`0x196d`) where the code expects a byte offset
+  (its siblings are `0x64b4` / `0x65b4`). On Sea Islands the comparison
+  never matched, so the HPD id resolved to `HPD_NONE` and every DP AUX
+  transaction failed ("flags not zero") — no EDID, framebuffer fallback.
+  Fixed by defining it as the byte offset (`0x65b4`). Verified on Bonaire.
+- **DisplayPort "out of range" fixed on all DCE generations.** The DP
+  CRTC pixel clock was programmed from the AdjustDisplayPll *link*
+  frequency instead of the real mode clock, scanning the panel out below
+  its refresh range. The DP path now programs the mode clock (the PLL
+  dividers still come from the adjusted clock), matching Linux. Verified
+  on Cape Verde and Bonaire.
+- **First Southern Islands / GCN 1.0 / DCE 6 part verified:** MSI
+  HD 7770 / R7 250X (Cape Verde XT, `0x683d`) on DVI-I, HDMI, and
+  DisplayPort at 1920×1200@60. DisplayPort also re-verified on Bonaire
+  (Sea Islands) and Turks (Northern Islands).
+- **4K@60-over-HDMI documented as unsupported** on every card the driver
+  covers: they are all HDMI 1.4a (340 MHz TMDS cap — a GPU limit, not the
+  cable), full-RGB 4K@60 needs HDMI 2.0, and the only way to fit it into
+  HDMI 1.4 is YCbCr 4:2:0, which the old Linux `radeon` driver never
+  implemented and neither does this fork. The 340 MHz cap matches Linux.
+  Use DisplayPort for 4K@60. No behavior change — documentation only.
+- Internal: `pll.cpp` / `displayport.cpp` normalized to LF line endings,
+  a dead `#if 0` block removed, and style tidy-up on the touched files.

@@ -13,6 +13,55 @@ experiments, and Linux references — see
 
 ---
 
+## [0.6.4] — 2026-07-01
+
+### Fixed
+
+- **DisplayPort now works on Sea Islands (DCE8).**
+  `connector_pick_atom_hpdid()` compares a connector's HPD GPIO register
+  against a per-DCE target register, but `SEA_mmDC_GPIO_HPD_A` was defined
+  as AMD's raw dword register index (`0x196d`) where the code expects a
+  byte offset (its siblings are `0x64b4` / `0x65b4`). On Sea Islands the
+  comparison never matched, so the HPD id resolved to `0xff` (`HPD_NONE`)
+  and every DisplayPort AUX transaction went out with no HPD — failing
+  with "flags not zero," reading no EDID, and falling back to the
+  framebuffer. Now defined as the byte offset (`0x65b4`, the same physical
+  register as Southern Islands). Verified on Bonaire (R7 260X).
+- **DisplayPort "out of range" fixed (all DCE generations).**
+  `pll_compute()` rewrites the pixel clock to the value its dividers
+  actually produce; for DisplayPort that target is the AdjustDisplayPll
+  *link* frequency (≈99900 kHz for a 154000 kHz mode), not the pixel rate.
+  The CRTC was being programmed with that link-derived clock, scanning the
+  panel out well below its refresh range. The DP path now programs the
+  real mode clock (the PLL dividers still come from the adjusted clock),
+  matching Linux `atombios_crtc_set_pll()`. TMDS (DVI/HDMI) paths are
+  unchanged. Verified on Cape Verde and Bonaire.
+
+### Added
+
+- **First Southern Islands / GCN 1.0 / DCE 6 part verified:** MSI Radeon
+  HD 7770 / R7 250X (Cape Verde XT, `0x683d`) — DVI-I, HDMI, and
+  DisplayPort all at 1920×1200@60. DisplayPort also re-verified on Bonaire
+  (Sea Islands) and Turks (Northern Islands).
+
+### Changed
+
+- Internal housekeeping on the files touched this cycle: `pll.cpp` and
+  `displayport.cpp` normalized from CRLF to LF line endings (they had been
+  imported with DOS endings, unlike the rest of the tree and upstream
+  Haiku), a dead `#if 0` block removed from `pll.cpp`, and trailing
+  whitespace / an over-length comment tidied. No functional change.
+
+### Notes
+
+- **4K@60 over HDMI is not supported on any card this driver covers**, now
+  documented in the README and technical docs. These GPUs are all HDMI
+  1.4a (340 MHz TMDS cap — a limit of the GPU silicon, not the cable);
+  full-RGB 4K@60 needs HDMI 2.0, and the only way to fit it into HDMI 1.4
+  is YCbCr 4:2:0, which the old Linux `radeon` driver never implemented and
+  neither does this fork. The 340 MHz HDMI cap matches Linux exactly. Use
+  DisplayPort for full-RGB 4K@60.
+
 ## [0.6.3] — 2026-06-04
 
 ### Fixed
@@ -347,6 +396,7 @@ shipped starting with 0.4.0.
 
 ---
 
+[0.6.4]: https://github.com/KevinAdams05/RadeonHDunofficial/releases/tag/v0.6.4
 [0.6.0]: https://github.com/KevinAdams05/RadeonHDunofficial/releases/tag/v0.6.0
 [0.5.0]: https://github.com/KevinAdams05/RadeonHDunofficial/releases/tag/v0.5.0
 [0.4.0]: https://github.com/KevinAdams05/RadeonHDunofficial/releases/tag/v0.4.0
