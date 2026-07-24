@@ -508,9 +508,9 @@ const struct supported_device {
 	{0x67ba, 8, 5, RADEON_HAWAII, CHIP_STD, "Radeon HD Hawaii"},
 	{0x67be, 8, 5, RADEON_HAWAII, CHIP_STD, "Radeon HD Hawaii"},
 
-	// WARN: DCE versions below here get sketchy
-
-#if 0 /* disabled for R1/beta5 */
+	// WARN: DCE 10-12 (Tonga/Fiji/Carrizo/Stoney/Polaris/Vega/Raven) enabled
+	// as of 0.6.5. Largely untested beyond Polaris. Navi (DCN, not DCE) stays
+	// disabled below.
 	// Introduced: 2014
 	// Codename: Volcanic Islands
 	// Process: 28 nm
@@ -618,6 +618,7 @@ const struct supported_device {
 	{0x15dd, 12, 0, RADEON_RAVEN, CHIP_APU, "Radeon Vega Raven"},
 	{0x15d8, 12, 0, RADEON_RAVEN, CHIP_APU, "Radeon Vega Raven"},
 
+#if 0 /* Navi uses DCN (not DCE); unsupported by this AtomBIOS/DCE driver */
 	// TODO: We might need to split NAVI into NAVI10, NAVI12, etc
 
 	// Introduced: 2019

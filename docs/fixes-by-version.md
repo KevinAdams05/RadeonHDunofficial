@@ -186,6 +186,24 @@ Generalizes the per-chip cap framework and adds a second chip:
   issues remotely.
 
 
+## 0.6.5 — DCE 10-12 enabled (Polaris, Vega)
+
+Enabled the GCN3+ device IDs that were compiled out behind
+`#if 0 /* disabled for R1/beta5 */` in `driver.cpp`, through **DCE 12**:
+
+- Volcanic Islands — Tonga (DCE 10.0), Fiji (DCE 10.1)
+- Carrizo / Stoney APUs (DCE 11.0 / 11.1)
+- Polaris 10/11/12 (DCE 11.2) — incl. Radeon RX 470/480/570/580/590
+  (`0x67df`) and RX 460/560
+- Vega M/10/12/20 (DCE 12.0/12.2), Raven APU (DCE 12.0)
+
+The driver will now attach to these cards, but display bring-up is
+**unverified** beyond a pending Polaris (RX 580) test — this release opens
+DCE 10–12 for testing rather than declaring it working. Navi (**DCN**, not
+DCE) and Topaz (no DCE) remain disabled.
+
+---
+
 ## 0.6.4 — DisplayPort fixes and Cape Verde (DCE6) support
 
 *2026-07-01*

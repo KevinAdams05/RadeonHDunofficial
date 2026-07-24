@@ -147,6 +147,7 @@ for the changelog-format release notes see
 | [0.6.2](https://github.com/KevinAdams05/RadeonHDunofficial/blob/main/docs/fixes-by-version.md#062--barts-pixel-clock-cap) | 2025-05-27 |  Radeon HD 6850: 4K@60hz is not working yet, added a pixel cap for now. |
 | [0.6.3](docs/fixes-by-version.md#063--hdmi-magenta-stripe-root-cause-fixed-dcn-guard-kernel-hardening) | 2026-06-04 | HDMI magenta stripe fixed. DVI fallback retired, real HDMI mode on DCE4+. DCN GPUs refused gracefully with framebuffer fallback, PCI BAR-assignment guard, etc... |
 | [0.6.4](docs/fixes-by-version.md#064--displayport-fixes-and-cape-verde-dce6-support) | 2026-07-01 | DisplayPort fixed on Sea Islands (HPD-id dword/byte) and all DCE (pixel clock); first Southern Islands / DCE6 part (Cape Verde) verified on DVI/HDMI/DP; HDMI 4K limitation documented |
+| [0.6.5](docs/fixes-by-version.md#065--dce-10-12-enabled-polaris-vega) | 2026-07-23 | Enabled DCE 10–12 families (Tonga/Fiji, Carrizo/Stoney, Polaris incl. RX 470–590, Vega/Raven) — newly enabled, largely untested (Polaris RX 580 test pending). Navi (DCN) stays disabled. |
 ---
 
 

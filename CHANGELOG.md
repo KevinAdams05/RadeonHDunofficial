@@ -13,6 +13,33 @@ experiments, and Linux references — see
 
 ---
 
+## [0.6.5] — 2026-07-23
+
+### Added
+
+- **Enabled the remaining DCE display families (DCE 10–12).** The GCN3+
+  section of the device table in `driver.cpp` was compiled out behind
+  `#if 0 /* disabled for R1/beta5 */`; it is now enabled through DCE 12.
+  The driver will now claim:
+  - **Volcanic Islands** — Tonga (DCE 10.0), Fiji (DCE 10.1)
+  - **Carrizo / Stoney** APUs (DCE 11.0 / 11.1)
+  - **Polaris 10/11/12** (DCE 11.2) — incl. **Radeon RX 470/480/570/580/590**
+    (`0x67df`) and RX 460/560
+  - **Vega** — Vega M/10/12/20 (DCE 12.0/12.2) and Raven APU (DCE 12.0)
+
+### Notes
+
+- **Newly enabled and largely untested.** Apart from a pending Polaris
+  (RX 580) test, none of these families has been verified on real hardware.
+  The driver attaching is not a guarantee of a working display — treat this
+  release as opening DCE 10–12 up for bring-up and testing.
+- **Navi stays disabled.** Navi uses **DCN**, not DCE, and is out of scope
+  for this AtomBIOS/DCE driver (several entries are also flagged non-working
+  upstream); its table block remains behind `#if 0`. Topaz/Iceland (no DCE
+  block) likewise remains disabled.
+
+---
+
 ## [0.6.4] — 2026-07-01
 
 ### Fixed
