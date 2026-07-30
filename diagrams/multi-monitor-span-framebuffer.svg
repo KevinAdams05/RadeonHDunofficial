@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 690" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#555"/>
+    </marker>
+    <marker id="dot" markerWidth="6" markerHeight="6" refX="3" refY="3">
+      <circle cx="3" cy="3" r="2.5" fill="#555"/>
+    </marker>
+    <linearGradient id="h" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#16a085"/>
+      <stop offset="100%" stop-color="#0e6655"/>
+    </linearGradient>
+    <filter id="s" x="-2%" y="-3%" width="104%" height="106%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-color="#00000025"/>
+    </filter>
+    <pattern id="dead" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#fdedec"/>
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#e74c3c" stroke-width="1.6"/>
+    </pattern>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="44" fill="url(#h)" rx="5"/>
+  <text x="480" y="29" text-anchor="middle" fill="white" font-size="16" font-weight="bold">Track A span mode: one framebuffer, two CRTC viewports, mismatched monitors</text>
+
+  <!-- ===== Framebuffer panel ===== -->
+  <rect x="20" y="58" width="920" height="286" rx="8" fill="#f8f9fa" stroke="#dee2e6" filter="url(#s)"/>
+  <text x="36" y="80" font-weight="bold" font-size="14" fill="#2c3e50">Single scanout surface in VRAM (the whole VRAM BAR is already mapped by the kernel driver)</text>
+  <text x="36" y="98" font-size="11" fill="#7f8c8d">Bounding box is what app_server sees as the desktop: Screen::Frame() = mode.virtual_width × mode.virtual_height</text>
+
+  <!-- bounding box -->
+  <rect x="60" y="116" width="720" height="180" fill="none" stroke="#2c3e50" stroke-width="2" stroke-dasharray="6 3"/>
+  <text x="420" y="112" text-anchor="middle" font-size="11" font-weight="bold" fill="#2c3e50">virtual_width = 4480  (bounding box, not a real resolution)</text>
+
+  <!-- monitor A region -->
+  <rect x="60" y="116" width="309" height="150" fill="#d6eaf8" stroke="#3498db" stroke-width="1.5"/>
+  <text x="214" y="150" text-anchor="middle" font-size="13" font-weight="bold" fill="#21618c">Monitor A viewport</text>
+  <text x="214" y="170" text-anchor="middle" font-size="11" fill="#21618c">1920 × 1200</text>
+  <text x="214" y="192" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#21618c">VIEWPORT_START = (0, 0)</text>
+  <text x="214" y="207" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#21618c">VIEWPORT_SIZE  = 1920&lt;&lt;16 | 1200</text>
+  <text x="214" y="222" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#21618c">GRPH_X_START / Y_START = 0</text>
+  <text x="214" y="244" text-anchor="middle" font-size="10" fill="#1e8449">→ CRTC 0, own DTD timing @ 60 Hz</text>
+
+  <!-- dead zone -->
+  <rect x="60" y="266" width="309" height="30" fill="url(#dead)" stroke="#e74c3c" stroke-width="1"/>
+  <text x="214" y="286" text-anchor="middle" font-size="11" font-weight="bold" fill="#c0392b">DEAD ZONE — 1920 × 240, no monitor scans it out</text>
+
+  <!-- monitor B region -->
+  <rect x="369" y="116" width="411" height="180" fill="#d5f5e3" stroke="#27ae60" stroke-width="1.5"/>
+  <text x="574" y="150" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e8449">Monitor B viewport</text>
+  <text x="574" y="170" text-anchor="middle" font-size="11" fill="#1e8449">2560 × 1440</text>
+  <text x="574" y="192" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1e8449">VIEWPORT_START = (1920, 0)</text>
+  <text x="574" y="207" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1e8449">VIEWPORT_SIZE  = 2560&lt;&lt;16 | 1440</text>
+  <text x="574" y="222" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1e8449">GRPH_SURFACE_OFFSET_X = 1920</text>
+  <text x="574" y="244" text-anchor="middle" font-size="10" fill="#1e8449">→ CRTC 1, own DTD timing @ 75 Hz</text>
+  <text x="574" y="266" text-anchor="middle" font-size="10" fill="#7f8c8d">both CRTCs point at the SAME base address;</text>
+  <text x="574" y="280" text-anchor="middle" font-size="10" fill="#7f8c8d">only the viewport origin differs</text>
+
+  <!-- height brace -->
+  <line x1="800" y1="116" x2="800" y2="296" stroke="#2c3e50" stroke-width="1.5" marker-start="url(#dot)" marker-end="url(#dot)"/>
+  <text x="812" y="200" font-size="11" fill="#2c3e50">virtual_height</text>
+  <text x="812" y="215" font-size="11" fill="#2c3e50">= 1440 (max)</text>
+
+  <!-- pitch note -->
+  <rect x="36" y="310" width="888" height="24" rx="4" fill="#fef9e7" stroke="#f39c12"/>
+  <text x="46" y="327" font-family="Consolas, monospace" font-size="10.5" fill="#b9770e">GRPH_PITCH = align(4480) → bytes_per_row = 4480 × 4 = 17 920 B; surface = 17 920 × 1440 ≈ 24.6 MiB — trivial against any ≥128 MiB card. Verify the pitch field width per DCE gen.</text>
+
+  <!-- ===== Consequences panel ===== -->
+  <rect x="20" y="356" width="452" height="196" rx="8" fill="#fdedec" stroke="#e74c3c" filter="url(#s)"/>
+  <text x="246" y="378" text-anchor="middle" font-weight="bold" font-size="14" fill="#c0392b">What breaks with mismatched monitors</text>
+  <text x="36" y="400" font-size="11" fill="#c0392b">• app_server knows nothing of the seam or the dead zone.</text>
+  <text x="36" y="418" font-size="11" fill="#c0392b">• BAlert / Twitcher centre on the bounding box → they land</text>
+  <text x="45" y="432" font-size="11" fill="#c0392b">straddling the bezel.</text>
+  <text x="36" y="450" font-size="11" fill="#c0392b">• The cursor can be parked in the dead zone and vanish.</text>
+  <text x="36" y="468" font-size="11" fill="#c0392b">• Windows can be dragged into the dead zone and lost</text>
+  <text x="45" y="482" font-size="11" fill="#c0392b">(exactly nephele's objection in the forum thread).</text>
+  <text x="36" y="500" font-size="11" fill="#c0392b">• One BScreen ⇒ one colour space, one gamma/LUT pair is</text>
+  <text x="45" y="514" font-size="11" fill="#c0392b">still per-CRTC but app_server has no way to address it.</text>
+  <text x="36" y="532" font-size="11" fill="#c0392b">• No per-monitor DPI — Haiku has no UI-scale API at all.</text>
+  <text x="36" y="546" font-size="11" font-style="italic" fill="#7f8c8d">Mitigation: default to equal-size heads; make unequal opt-in.</text>
+
+  <!-- ===== Bandwidth panel ===== -->
+  <rect x="488" y="356" width="452" height="196" rx="8" fill="#fef9e7" stroke="#f39c12" filter="url(#s)"/>
+  <text x="714" y="378" text-anchor="middle" font-weight="bold" font-size="14" fill="#b9770e">Why the watermark work becomes load-bearing</text>
+  <text x="504" y="400" font-size="11" fill="#b9770e">With one head, arbitration left at VBIOS defaults is survivable.</text>
+  <text x="504" y="418" font-size="11" fill="#b9770e">With two heads it is not:</text>
+  <text x="504" y="438" font-family="Consolas, monospace" font-size="10" fill="#b9770e">DC_LB_MEMORY_SPLIT</text>
+  <text x="504" y="452" font-size="11" fill="#b9770e">splits ONE line buffer between the two CRTCs of a pair. The</text>
+  <text x="504" y="466" font-size="11" fill="#b9770e">reset/VBIOS value assumes the idle head needs nothing.</text>
+  <text x="504" y="486" font-family="Consolas, monospace" font-size="10" fill="#b9770e">PRIORITY_A/B_CNT, LATENCY_CONTROL, DMIF_BUFFER_CONTROL</text>
+  <text x="504" y="500" font-size="11" fill="#b9770e">are all zero/default today — Phase A already proved this.</text>
+  <text x="504" y="520" font-size="11" fill="#c0392b">Symptom if skipped: intermittent scanout underflow (tearing,</text>
+  <text x="504" y="534" font-size="11" fill="#c0392b">horizontal garbage) on whichever head loses the split —</text>
+  <text x="504" y="548" font-size="11" fill="#c0392b">indistinguishable from a mode-set bug. Do Phase B first.</text>
+
+  <!-- ===== Existing UI panel ===== -->
+  <rect x="20" y="564" width="920" height="110" rx="8" fill="#eafaf1" stroke="#27ae60" filter="url(#s)"/>
+  <text x="480" y="586" text-anchor="middle" font-weight="bold" font-size="14" fill="#1e8449">The user-facing half already exists — Screen preferences, unchanged since Thomas Kurschel wrote it in 2002</text>
+  <text x="36" y="608" font-size="11" fill="#1e8449">Screen prefs shows a "Combine displays: disable / horizontally / vertically" menu, plus "Swap displays", "Use laptop panel" and "Video format".</text>
+  <text x="36" y="626" font-size="11" fill="#1e8449">They are hidden unless the accelerant answers a settings "tunnel" smuggled through BScreen::ProposeMode() with sentinel values 'TKTK' / 'KTKT'</text>
+  <text x="36" y="644" font-size="11" fill="#1e8449">(src/preferences/screen/multimon.cpp). A span mode is recognised by ScreenMode.cpp purely from  flags &amp; B_SCROLL  and  virtual_width == 2 × h_display.</text>
+  <text x="36" y="664" font-size="11" font-weight="bold" fill="#1e8449">⇒ Offer double-width / double-height B_SCROLL modes plus a B_PROPOSE_DISPLAY_MODE tunnel and the existing UI lights up with zero OS patches.</text>
+</svg>

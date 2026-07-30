@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 700" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#555"/>
+    </marker>
+    <marker id="ag" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#27ae60"/>
+    </marker>
+    <linearGradient id="h" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#16a085"/>
+      <stop offset="100%" stop-color="#0e6655"/>
+    </linearGradient>
+    <filter id="s" x="-2%" y="-3%" width="104%" height="106%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-color="#00000025"/>
+    </filter>
+    <pattern id="dead" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#f4f6f7"/>
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#bdc3c7" stroke-width="2"/>
+    </pattern>
+  </defs>
+
+  <!-- Title -->
+  <rect x="0" y="0" width="1020" height="44" fill="url(#h)" rx="5"/>
+  <text x="510" y="29" text-anchor="middle" fill="white" font-size="16" font-weight="bold">Haiku multi-monitor: three architectures through the RadeonHD stack</text>
+
+  <!-- ============ Column 1: TODAY ============ -->
+  <rect x="16" y="58" width="316" height="560" rx="8" fill="#fdedec" stroke="#e74c3c" stroke-width="1" filter="url(#s)"/>
+  <text x="174" y="80" text-anchor="middle" font-weight="bold" font-size="14" fill="#c0392b">Today (radeon_hd 0.6.x)</text>
+  <text x="174" y="96" text-anchor="middle" font-size="10" fill="#c0392b">one monitor, second head dark</text>
+
+  <rect x="40" y="108" width="268" height="30" rx="5" fill="#eaf2f8" stroke="#3498db"/>
+  <text x="174" y="128" text-anchor="middle" font-size="12" fill="#21618c">Desktop (one per user session)</text>
+
+  <rect x="40" y="152" width="268" height="42" rx="5" fill="#eaf2f8" stroke="#3498db"/>
+  <text x="174" y="169" text-anchor="middle" font-size="12" fill="#21618c">VirtualScreen</text>
+  <text x="174" y="185" text-anchor="middle" font-size="10" fill="#5499c7">fFrame = 1 screen; fHWInterface single</text>
+
+  <rect x="90" y="208" width="168" height="30" rx="5" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="174" y="228" text-anchor="middle" font-size="12" fill="#1e8449">Screen (id 0)</text>
+
+  <rect x="90" y="252" width="168" height="30" rx="5" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="174" y="272" text-anchor="middle" font-size="12" fill="#1e8449">AccelerantHWInterface</text>
+
+  <rect x="40" y="296" width="268" height="46" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+  <text x="174" y="313" text-anchor="middle" font-size="12" fill="#b9770e">accelerant hooks (API v1)</text>
+  <text x="174" y="330" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" fill="#b9770e">set_display_mode(mode) — no display id</text>
+
+  <rect x="40" y="356" width="268" height="40" rx="5" fill="#f8f9fa" stroke="#dee2e6"/>
+  <text x="174" y="372" text-anchor="middle" font-size="11" fill="#2c3e50">radeon_set_display_mode()</text>
+  <text x="174" y="388" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" fill="#c0392b">uint8 crtcID = 0;  // hardcoded</text>
+
+  <rect x="48" y="412" width="120" height="34" rx="4" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="108" y="434" text-anchor="middle" font-size="11" fill="#1e8449">CRTC 0 live</text>
+  <rect x="180" y="412" width="120" height="34" rx="4" fill="url(#dead)" stroke="#95a5a6" stroke-dasharray="3 2"/>
+  <text x="240" y="434" text-anchor="middle" font-size="11" fill="#7f8c8d">CRTC 1 idle</text>
+
+  <rect x="48" y="462" width="120" height="46" rx="4" fill="#2c3e50"/>
+  <text x="108" y="482" text-anchor="middle" font-size="11" fill="white">Monitor A</text>
+  <text x="108" y="497" text-anchor="middle" font-size="9" fill="#aab7c4">1920×1200</text>
+  <rect x="180" y="462" width="120" height="46" rx="4" fill="#f4f6f7" stroke="#95a5a6" stroke-dasharray="3 2"/>
+  <text x="240" y="482" text-anchor="middle" font-size="11" fill="#7f8c8d">Monitor B</text>
+  <text x="240" y="497" text-anchor="middle" font-size="9" fill="#95a5a6">detected, dark</text>
+
+  <text x="40" y="534" font-size="10" fill="#c0392b">• detect_displays() fills gDisplay[0..1] already</text>
+  <text x="40" y="550" font-size="10" fill="#c0392b">• only gDisplay[0] gets a mode / EDID / mode list</text>
+  <text x="40" y="566" font-size="10" fill="#c0392b">• BScreen::SetToNext() always fails (app_server</text>
+  <text x="49" y="580" font-size="10" fill="#c0392b">stubs AS_GET_NEXT_SCREEN_ID)</text>
+  <text x="40" y="600" font-size="10" font-style="italic" fill="#7f8c8d">Work needed: none — this is the shipping state.</text>
+
+  <!-- ============ Column 2: TRACK A ============ -->
+  <rect x="348" y="58" width="316" height="560" rx="8" fill="#fef9e7" stroke="#f39c12" stroke-width="1.5" filter="url(#s)"/>
+  <text x="506" y="80" text-anchor="middle" font-weight="bold" font-size="14" fill="#b9770e">Track A — span / clone ("combine")</text>
+  <text x="506" y="96" text-anchor="middle" font-size="10" fill="#b9770e">driver-only; BeOS-era mechanism, still wired up</text>
+
+  <rect x="372" y="108" width="268" height="30" rx="5" fill="#eaf2f8" stroke="#3498db"/>
+  <text x="506" y="128" text-anchor="middle" font-size="12" fill="#21618c">Desktop — unchanged</text>
+
+  <rect x="372" y="152" width="268" height="42" rx="5" fill="#eaf2f8" stroke="#3498db"/>
+  <text x="506" y="169" text-anchor="middle" font-size="12" fill="#21618c">VirtualScreen — unchanged</text>
+  <text x="506" y="185" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" fill="#5499c7">Frame() = virtual_width × virtual_height</text>
+
+  <rect x="422" y="208" width="168" height="30" rx="5" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="506" y="228" text-anchor="middle" font-size="12" fill="#1e8449">Screen (id 0) — still ONE</text>
+
+  <rect x="422" y="252" width="168" height="30" rx="5" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="506" y="272" text-anchor="middle" font-size="12" fill="#1e8449">AccelerantHWInterface</text>
+
+  <rect x="372" y="296" width="268" height="46" rx="5" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="506" y="313" text-anchor="middle" font-size="12" fill="#1e8449">accelerant hooks (API v1, unchanged)</text>
+  <text x="506" y="330" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" fill="#1e8449">mode.virtual_width = 2 × h_display | B_SCROLL</text>
+
+  <rect x="372" y="356" width="268" height="40" rx="5" fill="#fcf3cf" stroke="#f39c12"/>
+  <text x="506" y="372" text-anchor="middle" font-size="11" fill="#b9770e">radeon_set_display_mode() — REWRITE</text>
+  <text x="506" y="388" text-anchor="middle" font-size="9.5" fill="#b9770e">loop attached heads; per-head viewport offset</text>
+
+  <rect x="380" y="412" width="120" height="34" rx="4" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="440" y="429" text-anchor="middle" font-size="11" fill="#1e8449">CRTC 0</text>
+  <text x="440" y="441" text-anchor="middle" font-family="Consolas, monospace" font-size="8.5" fill="#1e8449">VIEWPORT (0,0)</text>
+  <rect x="512" y="412" width="120" height="34" rx="4" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="572" y="429" text-anchor="middle" font-size="11" fill="#1e8449">CRTC 1</text>
+  <text x="572" y="441" text-anchor="middle" font-family="Consolas, monospace" font-size="8.5" fill="#1e8449">VIEWPORT (1920,0)</text>
+
+  <rect x="380" y="462" width="120" height="46" rx="4" fill="#2c3e50"/>
+  <text x="440" y="482" text-anchor="middle" font-size="11" fill="white">Monitor A</text>
+  <text x="440" y="497" text-anchor="middle" font-size="9" fill="#aab7c4">left half</text>
+  <rect x="512" y="462" width="120" height="46" rx="4" fill="#2c3e50"/>
+  <text x="572" y="482" text-anchor="middle" font-size="11" fill="white">Monitor B</text>
+  <text x="572" y="497" text-anchor="middle" font-size="9" fill="#aab7c4">right half</text>
+
+  <text x="372" y="534" font-size="10" fill="#b9770e">• ONE wide framebuffer, ONE BScreen, ONE workspace</text>
+  <text x="372" y="550" font-size="10" fill="#b9770e">• Screen prefs "Combine displays" UI already exists</text>
+  <text x="372" y="566" font-size="10" fill="#c0392b">• no per-monitor DPI; heterogeneous res = dead zones</text>
+  <text x="372" y="582" font-size="10" fill="#c0392b">• app_server centres dialogs in the seam</text>
+  <text x="372" y="602" font-size="10" font-style="italic" fill="#1e8449">Work needed: driver only — shippable in this fork.</text>
+
+  <!-- ============ Column 3: TRACK B ============ -->
+  <rect x="680" y="58" width="324" height="560" rx="8" fill="#eaf2f8" stroke="#3498db" stroke-width="1.5" filter="url(#s)"/>
+  <text x="842" y="80" text-anchor="middle" font-weight="bold" font-size="14" fill="#21618c">Track B — true multi-screen</text>
+  <text x="842" y="96" text-anchor="middle" font-size="10" fill="#21618c">needs accelerant API v2 + app_server work</text>
+
+  <rect x="704" y="108" width="276" height="30" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="842" y="128" text-anchor="middle" font-size="12" fill="#c0392b">Desktop — split session vs. per-screen draw</text>
+
+  <rect x="704" y="152" width="276" height="42" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="842" y="169" text-anchor="middle" font-size="12" fill="#c0392b">VirtualScreen — aggregate N interfaces</text>
+  <text x="842" y="185" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#c0392b">AddScreen(): "works only for single screen"</text>
+
+  <rect x="712" y="208" width="128" height="30" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="776" y="228" text-anchor="middle" font-size="11" fill="#c0392b">Screen (id 0)</text>
+  <rect x="848" y="208" width="128" height="30" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="912" y="228" text-anchor="middle" font-size="11" fill="#c0392b">Screen (id 1)</text>
+
+  <rect x="712" y="252" width="128" height="30" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="776" y="272" text-anchor="middle" font-size="11" fill="#c0392b">HWInterface 0</text>
+  <rect x="848" y="252" width="128" height="30" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="912" y="272" text-anchor="middle" font-size="11" fill="#c0392b">HWInterface 1</text>
+
+  <rect x="704" y="296" width="276" height="46" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="842" y="313" text-anchor="middle" font-size="12" fill="#c0392b">accelerant hooks API v2 (Gerrit 329)</text>
+  <text x="842" y="330" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" fill="#c0392b">set_display_mode(uint8 displayID, mode)</text>
+
+  <rect x="704" y="356" width="276" height="40" rx="5" fill="#fcf3cf" stroke="#f39c12"/>
+  <text x="842" y="372" text-anchor="middle" font-size="11" fill="#b9770e">radeon_* hooks take displayID</text>
+  <text x="842" y="388" text-anchor="middle" font-size="9.5" fill="#b9770e">per-head mode list, EDID, DPMS, framebuffer</text>
+
+  <rect x="712" y="412" width="128" height="34" rx="4" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="776" y="429" text-anchor="middle" font-size="11" fill="#1e8449">CRTC 0</text>
+  <text x="776" y="441" text-anchor="middle" font-size="8.5" fill="#1e8449">own timing + surface</text>
+  <rect x="848" y="412" width="128" height="34" rx="4" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="912" y="429" text-anchor="middle" font-size="11" fill="#1e8449">CRTC 1</text>
+  <text x="912" y="441" text-anchor="middle" font-size="8.5" fill="#1e8449">own timing + surface</text>
+
+  <rect x="712" y="462" width="128" height="46" rx="4" fill="#2c3e50"/>
+  <text x="776" y="482" text-anchor="middle" font-size="11" fill="white">Monitor A</text>
+  <text x="776" y="497" text-anchor="middle" font-size="9" fill="#aab7c4">1920×1200 @ 60</text>
+  <rect x="848" y="462" width="128" height="46" rx="4" fill="#2c3e50"/>
+  <text x="912" y="482" text-anchor="middle" font-size="11" fill="white">Monitor B</text>
+  <text x="912" y="497" text-anchor="middle" font-size="9" fill="#aab7c4">2560×1440 @ 75</text>
+
+  <text x="704" y="534" font-size="10" fill="#21618c">• per-monitor resolution, refresh, colour space, EDID</text>
+  <text x="704" y="550" font-size="10" fill="#21618c">• real BScreen enumeration; hot-plug possible</text>
+  <text x="704" y="566" font-size="10" fill="#21618c">• per-monitor DPI still needs NEW Haiku UI-scale API</text>
+  <text x="704" y="582" font-size="10" fill="#c0392b">• Gerrit 329 = header only, open since 2018, unmerged</text>
+  <text x="704" y="602" font-size="10" font-style="italic" fill="#c0392b">Work needed: OS-wide — outside this fork's scope.</text>
+
+  <!-- Legend -->
+  <rect x="16" y="634" width="988" height="50" rx="6" fill="#f8f9fa" stroke="#dee2e6"/>
+  <rect x="32" y="650" width="14" height="14" rx="3" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="54" y="661" font-size="11" fill="#1e8449">exists and works unchanged</text>
+  <rect x="260" y="650" width="14" height="14" rx="3" fill="#fcf3cf" stroke="#f39c12"/>
+  <text x="282" y="661" font-size="11" fill="#b9770e">RadeonHD driver work (in fork scope)</text>
+  <rect x="560" y="650" width="14" height="14" rx="3" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="582" y="661" font-size="11" fill="#c0392b">Haiku OS work (out of fork scope)</text>
+  <rect x="828" y="650" width="14" height="14" rx="3" fill="url(#dead)" stroke="#95a5a6" stroke-dasharray="3 2"/>
+  <text x="850" y="661" font-size="11" fill="#7f8c8d">idle / unused</text>
+</svg>
