@@ -22,6 +22,7 @@
 
 #include "accelerant.h"
 #include "accelerant_protos.h"
+#include "bandwidth.h"
 #include "bios.h"
 #include "connector.h"
 #include "display.h"
@@ -176,66 +177,6 @@ radeon_dpms_set_hook(int mode)
 }
 
 
-/*! Phase A instrumentation for the scanout-watermark investigation
-	(docs/scanout-watermark-investigation.md): TRACE a read-back of the
-	line-buffer split, priority counters, latency watermarks, and DMIF
-	buffer allocation that the VBIOS/GOP (or nobody) left behind for the
-	mode we just set. Read-only by design.
-
-	The PIPE arbitration/latency pair is dumped at both candidate
-	per-pipe strides — 0x10 per Linux evergreen_program_watermarks(),
-	0x20 per our earlier groundwork notes — so real-hardware values can
-	disambiguate which is correct. (Identical for pipe 0, which is why
-	the second read is gated on id > 0.)
-
-	Both CRTCs of the first pair are dumped regardless of which one is
-	active: the line buffer is shared between them, so the idle CRTC's
-	split setting matters too. */
-static void
-bandwidth_registers_dump()
-{
-	radeon_shared_info& info = *gInfo->shared_info;
-
-	// These registers exist on DCE 4/5 (Evergreen / Northern Islands)
-	// only; DCE 6 moved the arbitration pair to the DPG block.
-	if (info.chipsetID < RADEON_CEDAR || info.chipsetID >= RADEON_TAHITI)
-		return;
-
-	static const uint32 kCrtcOffsets[2] = {
-		EVERGREEN_CRTC0_REGISTER_OFFSET,
-		EVERGREEN_CRTC1_REGISTER_OFFSET
-	};
-
-	for (uint8 id = 0; id < 2; id++) {
-		uint32 crtcOffset = kCrtcOffsets[id];
-
-		TRACE("%s: CRTC %u bandwidth/watermark state:\n", __func__, id);
-		TRACE("  DC_LB_MEMORY_SPLIT        0x%08" B_PRIx32 "\n",
-			Read32(OUT, EVERGREEN_DC_LB_MEMORY_SPLIT + crtcOffset));
-		TRACE("  PRIORITY_A_CNT            0x%08" B_PRIx32 "\n",
-			Read32(OUT, EVERGREEN_PRIORITY_A_CNT + crtcOffset));
-		TRACE("  PRIORITY_B_CNT            0x%08" B_PRIx32 "\n",
-			Read32(OUT, EVERGREEN_PRIORITY_B_CNT + crtcOffset));
-		TRACE("  ARBITRATION_CONTROL3/0x10 0x%08" B_PRIx32 "\n",
-			Read32(OUT, EVERGREEN_PIPE0_ARBITRATION_CONTROL3
-				+ id * 0x10));
-		TRACE("  LATENCY_CONTROL/0x10      0x%08" B_PRIx32 "\n",
-			Read32(OUT, EVERGREEN_PIPE0_LATENCY_CONTROL + id * 0x10));
-		if (id > 0) {
-			TRACE("  ARBITRATION_CONTROL3/0x20 0x%08" B_PRIx32 "\n",
-				Read32(OUT, EVERGREEN_PIPE0_ARBITRATION_CONTROL3
-					+ id * 0x20));
-			TRACE("  LATENCY_CONTROL/0x20      0x%08" B_PRIx32 "\n",
-				Read32(OUT, EVERGREEN_PIPE0_LATENCY_CONTROL
-					+ id * 0x20));
-		}
-		TRACE("  DMIF_BUFFER_CONTROL       0x%08" B_PRIx32 "\n",
-			Read32(OUT, EVERGREEN_PIPE0_DMIF_BUFFER_CONTROL
-				+ id * EVERGREEN_PIPE_REGISTER_STRIDE));
-	}
-}
-
-
 status_t
 radeon_set_display_mode(display_mode* mode)
 {
@@ -354,9 +295,13 @@ radeon_set_display_mode(display_mode* mode)
 		hdmi_block_dump(crtcID);
 	}
 
-	// Phase A instrumentation (scanout-watermark investigation): what
-	// bandwidth-arbitration state did this mode set leave behind?
-	bandwidth_registers_dump();
+	// Scanout bandwidth arbitration. Must run after the CRTC and encoder
+	// are programmed, because it derives the watermarks from the mode that
+	// was actually applied. The before/after dumps bracket it so a syslog
+	// alone shows both what the VBIOS left and what we wrote.
+	bandwidth_registers_dump("before bandwidth update");
+	bandwidth_update();
+	bandwidth_registers_dump("after bandwidth update");
 
 	return B_OK;
 }

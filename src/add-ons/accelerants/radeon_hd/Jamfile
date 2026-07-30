@@ -12,6 +12,7 @@ UsePrivateHeaders shared ;
 Addon radeon_hd.accelerant :
 	accelerant.cpp
 	atom.cpp
+	bandwidth.cpp
 	bios.cpp
 	connector.cpp
 	create_display_modes.cpp
@@ -24,6 +25,7 @@ Addon radeon_hd.accelerant :
 	hooks.cpp
 	mode.cpp
 	pll.cpp
+	powerplay.cpp
 	ringqueue.cpp
 	: be libaccelerantscommon.a [ TargetLibsupc++ ]
 ;

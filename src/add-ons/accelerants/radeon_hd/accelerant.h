@@ -86,6 +86,12 @@ struct accelerant_info {
 	uint32			displayClockFrequency;
 	uint32			dpExternalClock;
 
+	// Default engine (sclk) and memory (yclk) clocks, in kHz. Inputs to
+	// the display bandwidth arbitration math in bandwidth.cpp. We have no
+	// power management, so the defaults are the only clocks we ever run.
+	uint32			engineClockFrequency;
+	uint32			memoryClockFrequency;
+
 	uint32			lvdsSpreadSpectrumID;
 
 	RingQueue*		ringQueue[RADEON_QUEUE_MAX]; // Ring buffer command processor

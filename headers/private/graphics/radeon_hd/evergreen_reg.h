@@ -283,18 +283,36 @@
  * The LB-split and PRIORITY counters live at the same absolute offsets
  * across DCE 4 (Evergreen), DCE 5 (Northern Islands), DCE 6 (Southern
  * Islands), and DCE 8 (Sea Islands) — each CRTC adds an offset from
- * EVERGREEN_CRTCn_REGISTER_OFFSET above. The DPG_PIPE_* registers exist
- * only on DCE 5+; DCE 4 uses a different PIPE_* pair at 0x0bf0 / 0x0bf4
- * with a fixed per-pipe stride of 0x20.
+ * EVERGREEN_CRTCn_REGISTER_OFFSET above.
+ *
+ * The PIPE_* arbitration pair below covers every chipset this driver
+ * programs watermarks on: DCE 4 (Evergreen), DCE 4.1 (Palm / Sumo) and
+ * DCE 5 (Northern Islands, including Cayman). DCE 6 / Southern Islands
+ * moved the pair into the DPG block at a different offset and layout —
+ * see the NI_DPG_* note in ni_reg.h.
+ *
+ * NOTE: the two register groups here use *different* per-pipe strides.
+ * See EVERGREEN_PIPE_ARBITRATION_STRIDE below.
  */
+/* On DCE 4 and DCE 5 the partition number is written as a bare value into
+ * bits 2:0 of this register. DCE 6 / Southern Islands keeps the same
+ * register address but moved the field to bits 23:20 — that is what
+ * SI_DC_LB_MEMORY_CONFIG() in si_reg.h is for. Do not use the shifted
+ * form here: an earlier revision of this header carried a
+ * EVERGREEN_DC_LB_MEMORY_CONFIG(x) << 20 macro copied from the SI
+ * layout, and on a Turks board it wrote to read-only bits while silently
+ * clearing the partner CRTC's real setting in bits 2:0. */
 #define EVERGREEN_DC_LB_MEMORY_SPLIT				0x6b0c
-#define		EVERGREEN_DC_LB_MEMORY_SPLIT_MASK		0x00000003
-#define		EVERGREEN_DC_LB_MEMORY_CONFIG(x)		(((x) & 0xf) << 20)
+#define		EVERGREEN_DC_LB_MEMORY_SPLIT_MASK		0x00000007
 #define		EVERGREEN_DC_LB_DISP1_END_ADR_SHIFT		4
 #define		EVERGREEN_DC_LB_MEMORY_SPLIT_D1HALF_D2HALF	0
 #define		EVERGREEN_DC_LB_MEMORY_SPLIT_D1_3Q_D2_1Q	1
 #define		EVERGREEN_DC_LB_MEMORY_SPLIT_D1_ONLY		2
 #define		EVERGREEN_DC_LB_MEMORY_SPLIT_D1_1Q_D2_3Q	3
+// Each line buffer is shared by a CRTC pair. The four partitions above
+// describe the first CRTC's share; the second CRTC of the pair selects
+// the mirrored partition by adding this to the partition number.
+#define		EVERGREEN_DC_LB_MEMORY_SPLIT_SECOND		4
 
 #define EVERGREEN_PRIORITY_A_CNT					0x6b18
 #define EVERGREEN_PRIORITY_B_CNT					0x6b1c
@@ -302,7 +320,12 @@
 #define		EVERGREEN_PRIORITY_OFF					(1 << 16)
 #define		EVERGREEN_PRIORITY_ALWAYS_ON			(1 << 20)
 
-/* DCE 4 (Evergreen pre-NI) PIPE registers — fixed stride per pipe */
+/* Per-pipe display arbitration — DCE 4, 4.1 and 5.
+ *
+ * ARBITRATION_CONTROL3 selects which of the two latency-watermark slots
+ * LATENCY_CONTROL reads and writes; slot A is for the high clock state
+ * and slot B for the low one (DPM). Both slots must be programmed.
+ */
 #define EVERGREEN_PIPE0_ARBITRATION_CONTROL3		0x0bf0
 #define		EVERGREEN_PIPE_LATENCY_WATERMARK_MASK(x)	(((x) & 0x3) << 16)
 #define EVERGREEN_PIPE0_LATENCY_CONTROL				0x0bf4
@@ -311,7 +334,14 @@
 #define EVERGREEN_PIPE0_DMIF_BUFFER_CONTROL			0x0ca0
 #define		EVERGREEN_DMIF_BUFFERS_ALLOCATED(x)		(((x) & 0xf) << 0)
 #define		EVERGREEN_DMIF_BUFFERS_ALLOCATED_COMPLETED	(1 << 4)
+
+// Two different per-pipe strides, which is easy to get wrong: the
+// arbitration/latency pair steps 0x10 per pipe, while the DMIF buffer
+// control steps 0x20. They are identical for pipe 0, so a mistake here
+// only shows up once a second head is programmed.
+#define EVERGREEN_PIPE_ARBITRATION_STRIDE			0x10
 #define EVERGREEN_PIPE_REGISTER_STRIDE				0x20
+	// DMIF buffer control only
 
 /* MC channel-count map. Address shared with R700; mask differs across
  * generations (Evergreen / NI = 2 bits → max 8 channels;

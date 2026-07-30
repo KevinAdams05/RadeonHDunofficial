@@ -19,6 +19,7 @@
 #include "atom.h"
 #include "bios.h"
 #include "pll.h"
+#include "powerplay.h"
 #include "utility.h"
 
 
@@ -32,6 +33,53 @@
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
+
+
+/*!	Current engine clock in kHz via the AtomBIOS GetEngineClock command
+	table, or 0 if the table is missing or answers zero.
+
+	FirmwareInfo's ulDefaultEngineClock is a table *default*, not the clock
+	the card is running at: on a Turks HD 6570 it reads 100 MHz against a
+	650 MHz operating spec, because the VBIOS posts a low-power state and
+	Haiku has no power management to raise it. The display bandwidth
+	arbitration in bandwidth.cpp needs the real clock — a 6x error in the
+	memory clock is a 6x error in the DRAM bandwidth ceiling. Linux reaches
+	the same numbers through rdev->pm.current_sclk, which it maintains from
+	this table. */
+static uint32
+radeon_gpu_engine_clock_current()
+{
+	GET_ENGINE_CLOCK_PS_ALLOCATION args;
+	args.ulReturnEngineClock = 0;
+
+	int index = GetIndexIntoMasterTable(COMMAND, GetEngineClock);
+	if (atom_execute_table(gAtomContext, index, (uint32*)&args) != B_OK) {
+		TRACE("%s: GetEngineClock command table failed\n", __func__);
+		return 0;
+	}
+
+	// Returned in 10 kHz units.
+	return B_LENDIAN_TO_HOST_INT32(args.ulReturnEngineClock) * 10;
+}
+
+
+/*!	Current memory clock in kHz via the AtomBIOS GetMemoryClock command
+	table, or 0 if unavailable. See radeon_gpu_engine_clock_current() for
+	why the FirmwareInfo default is not good enough. */
+static uint32
+radeon_gpu_memory_clock_current()
+{
+	GET_MEMORY_CLOCK_PS_ALLOCATION args;
+	args.ulReturnMemoryClock = 0;
+
+	int index = GetIndexIntoMasterTable(COMMAND, GetMemoryClock);
+	if (atom_execute_table(gAtomContext, index, (uint32*)&args) != B_OK) {
+		TRACE("%s: GetMemoryClock command table failed\n", __func__);
+		return 0;
+	}
+
+	return B_LENDIAN_TO_HOST_INT32(args.ulReturnMemoryClock) * 10;
+}
 
 
 status_t
@@ -88,6 +136,43 @@ radeon_gpu_probe()
 
 	if (gInfo->maximumPixelClock == 0)
 		gInfo->maximumPixelClock = 400000;
+
+	// Engine / memory clocks feed the display bandwidth arbitration math
+	// (bandwidth.cpp). Read the FirmwareInfo defaults first — both sit
+	// immediately after ulFirmwareRevision in every table revision, so the
+	// base struct view is version-safe — then prefer the live values from
+	// the AtomBIOS query tables, which report what the card is actually
+	// running at rather than a boot-state default.
+	uint32 defaultEngineClock = B_LENDIAN_TO_HOST_INT32(
+		firmwareInfo->info.ulDefaultEngineClock) * 10;
+	uint32 defaultMemoryClock = B_LENDIAN_TO_HOST_INT32(
+		firmwareInfo->info.ulDefaultMemoryClock) * 10;
+
+	uint32 currentEngineClock = radeon_gpu_engine_clock_current();
+	uint32 currentMemoryClock = radeon_gpu_memory_clock_current();
+
+	gInfo->engineClockFrequency = currentEngineClock != 0
+		? currentEngineClock : defaultEngineClock;
+	gInfo->memoryClockFrequency = currentMemoryClock != 0
+		? currentMemoryClock : defaultMemoryClock;
+
+	// All three are traced so a syslog shows any discrepancy without a
+	// rebuild: a large default-vs-current gap means the card is parked in a
+	// low-power state, which caps the bandwidth available to scanout.
+	TRACE("%s: clocks (FirmwareInfo default): engine %" B_PRIu32 " kHz, "
+		"memory %" B_PRIu32 " kHz\n", __func__, defaultEngineClock,
+		defaultMemoryClock);
+	TRACE("%s: clocks (AtomBIOS current): engine %" B_PRIu32 " kHz, "
+		"memory %" B_PRIu32 " kHz\n", __func__, currentEngineClock,
+		currentMemoryClock);
+	TRACE("%s: clocks (in use): engine %" B_PRIu32 " kHz, memory %" B_PRIu32
+		" kHz, display %" B_PRIu32 " kHz\n", __func__,
+		gInfo->engineClockFrequency, gInfo->memoryClockFrequency,
+		gInfo->displayClockFrequency);
+
+	// What could this board reach if it were managed? Read-only; corroborates
+	// the clocks above against the table's own lowest level.
+	powerplay_dump_performance_levels();
 
 	return B_OK;
 }

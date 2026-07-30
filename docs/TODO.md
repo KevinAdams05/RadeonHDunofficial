@@ -63,12 +63,25 @@ let `display_get_encoder_mode` return `ATOM_ENCODER_MODE_HDMI`.
 pixel clock) is stride-aliased on the HD 6850, but the true ceiling
 between 340 MHz and 533 MHz is undetermined, so intermediate modes
 (4K@30, 1440p@60, 1080p@144, 3440×1440@60) are being rejected or allowed
-only by approximation. The real fix is the in-driver display-watermark /
-line-buffer programming port (`evergreen_bandwidth_update` /
-`dce6_/dce8_bandwidth_update`, see CHANGELOG 0.6.2 narrative), which would
-let the per-chip caps be lifted. Fix direction: port the bandwidth/
-line-buffer programming, then raise or remove the Barts cap; until then,
-test intermediate modes on hardware to tighten the cap value.
+only by approximation.
+
+**Updated 2026-07-30 — the watermark theory is done and it was not the
+answer.** The display-watermark / line-buffer programming named here as
+"the real fix" is now implemented for DCE 4/5 (`bandwidth.cpp`) and
+verified on Turks hardware, but it does **not** lift the caps. A clock
+probe added in the same pass showed why: the card runs at PowerPlay
+**level 1** (100 MHz engine / 150 MHz memory), which allows about
+1680 MB/s of DRAM bandwidth, and 4K@60 needs 1861 MB/s of average
+scanout. The caps are a genuine bandwidth limit — just one caused by the
+card sitting in its lowest power state, not by unprogrammed arbitration.
+
+The board advertises 900 MHz memory at levels 0 and 2, worth roughly
+10080 MB/s, so the caps *are* liftable — via **power management**, not
+watermarks. Fix direction is now: implement the clock/voltage write path
+(target level 2; voltage first, see
+`docs/scanout-watermark-investigation.md` §9), then recompute the caps.
+`bandwidth.cpp` needs no change for that — its watermarks derive from
+`gInfo->memoryClockFrequency` and follow raised clocks automatically.
 
 ---
 
@@ -230,6 +243,17 @@ tracked here so the scattered TODOs are visible in one place.
 These are unsupported-path stubs (DVO encoder setup, hardcoded NTSC TV)
 that emit a TRACE and continue. Low priority; revisit only if those
 encoder types need to be supported.
+
+### 16. Style-guide linter + pre-release gate (tooling)
+Build a script/tool that mechanically enforces `docs/STYLE_GUIDE.md` and run
+it (requiring a pass) before every release — i.e. automate the "separate style
+audit" this list defers to in its preamble, and wire it into the release
+checklist. Scope-aware: this fork is driver-only, so the linter runs against
+the fork-carried `radeon_hd` tree, not upstream-only files. Cross-project
+effort shared with the AST2400, NFSMount, and UEFI Wizard tools (all
+Haiku-style guides); a single shared linter is the goal rather than four
+one-offs. Likely path: clang-format + clang-tidy with a project config in a
+release-gate wrapper.
 
 ---
 
