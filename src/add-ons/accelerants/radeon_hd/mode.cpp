@@ -29,6 +29,7 @@
 #include "displayport.h"
 #include "encoder.h"
 #include "hdmi.h"
+#include "multimon_tunnel.h"
 #include "pll.h"
 #include "powerplay.h"
 #include "utility.h"
@@ -50,6 +51,154 @@ extern "C" void _sPrintf(const char* format, ...);
 static bool is_mode_supported_on_display(display_mode* mode, uint32 crtid);
 
 
+/*!	Is this a horizontal-span mode?
+
+	The test is Screen preferences' own, from get_combine_mode() in
+	ScreenMode.cpp: B_SCROLL set, and a virtual_width of exactly twice the
+	per-head h_display. Matching it exactly matters — app_server and Screen
+	preferences decide a mode is "combined" by this rule, so if we programmed
+	span on any other basis the two would disagree about the desktop size. */
+static bool
+is_horizontal_span_mode(const display_mode* mode)
+{
+	if ((mode->flags & B_SCROLL) == 0)
+		return false;
+
+	return mode->virtual_width == mode->timing.h_display * 2
+		&& mode->virtual_height == mode->timing.v_display;
+}
+
+
+/*!	Add horizontal-span variants of the offered modes.
+
+	A span mode is an ordinary mode — same timing, same per-head pixel clock —
+	carrying a framebuffer twice as wide and the B_SCROLL flag. app_server
+	derives the desktop size from virtual_width all by itself
+	(Screen::Frame()), so advertising these is all it takes for the desktop to
+	become 2 x wide; the driver's part is pointing the second CRTC at the
+	right-hand half, which display_crtc_fb_set() does from
+	display_info::viewportOriginX.
+
+	Gated on span_displays, off by default, for the same reason clone is: a
+	second head that mode-sets badly costs the user the working display they
+	already had.
+
+	create_display_modes() owns the area it returns, so growing the list means
+	building a new area and handing the old one back. */
+static status_t
+add_span_modes(void)
+{
+	radeon_shared_info& info = *gInfo->shared_info;
+
+	if (!radeon_setting_enabled("span_displays"))
+		return B_OK;
+
+	// Span needs a real second head. Without one the extra modes would be
+	// offered but only ever show their left half.
+	if (!gDisplay[1]->attached) {
+		TRACE("%s: span_displays set but only one display attached - not "
+			"offering span modes\n", __func__);
+		return B_OK;
+	}
+
+	if (info.dceMajor < 4) {
+		TRACE("%s: span_displays set, but DCE %" B_PRIu8 " has no PLL "
+			"allocator - not offering span modes\n", __func__, info.dceMajor);
+		return B_OK;
+	}
+
+	uint32 baseCount = info.mode_count;
+	display_mode* baseList = gInfo->mode_list;
+
+	// Which of the offered modes can actually be spanned? Both heads have to
+	// accept the timing, and the double-width surface has to fit the mapped
+	// framebuffer.
+	display_mode* spanList = (display_mode*)malloc(
+		baseCount * sizeof(display_mode));
+	if (spanList == NULL)
+		return B_NO_MEMORY;
+
+	uint32 spanCount = 0;
+	for (uint32 i = 0; i < baseCount; i++) {
+		display_mode candidate = baseList[i];
+
+		// Already a span mode, or too wide to double without overflowing the
+		// 16-bit virtual_width.
+		if (is_horizontal_span_mode(&candidate)
+			|| candidate.timing.h_display > 0x7fff)
+			continue;
+
+		candidate.virtual_width = candidate.timing.h_display * 2;
+		candidate.virtual_height = candidate.timing.v_display;
+		candidate.flags |= B_SCROLL;
+
+		if (!is_mode_supported_on_display(&candidate, 0)
+			|| !is_mode_supported_on_display(&candidate, 1))
+			continue;
+
+		// Bytes per row is derived from virtual_width, so a span surface costs
+		// twice the memory of the same mode unspanned.
+		//
+		// shared_info.frame_buffer_size is in KILOBYTES, not bytes — the
+		// kernel driver stores the BAR size that way and multiplies by 1024
+		// wherever it needs an address range. Comparing bytes against it
+		// directly makes every span mode look 1024x too expensive.
+		uint32 bytesPerPixel = (candidate.space == B_CMAP8) ? 1
+			: ((candidate.space == B_RGB15_LITTLE
+				|| candidate.space == B_RGB16_LITTLE) ? 2 : 4);
+		uint64 needed = (uint64)candidate.virtual_width
+			* candidate.virtual_height * bytesPerPixel;
+		uint64 available = (uint64)info.frame_buffer_size * 1024;
+		if (needed > available) {
+			TRACE("%s: %" B_PRIu16 "x%" B_PRIu16 " span needs %" B_PRIu64
+				" bytes, framebuffer is %" B_PRIu64 " - skipping\n", __func__,
+				candidate.virtual_width, candidate.virtual_height, needed,
+				available);
+			continue;
+		}
+
+		spanList[spanCount++] = candidate;
+	}
+
+	if (spanCount == 0) {
+		TRACE("%s: no offered mode can be spanned\n", __func__);
+		free(spanList);
+		return B_OK;
+	}
+
+	uint32 totalCount = baseCount + spanCount;
+	size_t size = (sizeof(display_mode) * totalCount + B_PAGE_SIZE - 1)
+		& ~(B_PAGE_SIZE - 1);
+
+	display_mode* combined = NULL;
+	area_id area = create_area("radeon HD modes", (void**)&combined,
+		B_ANY_ADDRESS, size, B_NO_LOCK,
+		B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
+	if (area < B_OK) {
+		free(spanList);
+		return area;
+	}
+
+	memcpy(combined, baseList, baseCount * sizeof(display_mode));
+	memcpy(combined + baseCount, spanList, spanCount * sizeof(display_mode));
+	free(spanList);
+
+	// Publish the new list before dropping the old area, so nothing can
+	// observe a mode_list pointing into freed space.
+	area_id oldArea = gInfo->mode_list_area;
+	gInfo->mode_list_area = area;
+	gInfo->mode_list = combined;
+	info.mode_list_area = area;
+	info.mode_count = totalCount;
+	delete_area(oldArea);
+
+	TRACE("%s: added %" B_PRIu32 " span mode(s) to %" B_PRIu32
+		" base mode(s)\n", __func__, spanCount, baseCount);
+
+	return B_OK;
+}
+
+
 status_t
 create_mode_list(void)
 {
@@ -67,6 +216,12 @@ create_mode_list(void)
 		return gInfo->mode_list_area;
 
 	gInfo->shared_info->mode_list_area = gInfo->mode_list_area;
+
+	// Widen the list with span variants. A failure here is not fatal — the
+	// base list is already usable, so fall through with what we have.
+	if (add_span_modes() != B_OK)
+		ERROR("%s: could not add span modes, continuing without them\n",
+			__func__);
 
 	return B_OK;
 }
@@ -263,7 +418,7 @@ release_pll_assignments()
 
 	Returns the number of heads selected, always at least one. */
 static uint32
-select_clone_heads(display_mode* mode, bool* heads)
+select_clone_heads(display_mode* mode, bool* heads, bool span)
 {
 	radeon_shared_info &info = *gInfo->shared_info;
 
@@ -273,12 +428,17 @@ select_clone_heads(display_mode* mode, bool* heads)
 	heads[0] = true;
 	uint32 headCount = 1;
 
-	if (!radeon_setting_enabled("clone_displays"))
+	// A span mode is itself the request for two heads — app_server has already
+	// sized the desktop to virtual_width — so it does not also need the clone
+	// gate. Clone, which is indistinguishable from a plain single-head mode
+	// from the mode alone, does.
+	if (!span && !radeon_setting_enabled("clone_displays"))
 		return headCount;
 
 	if (info.dceMajor < 4) {
-		TRACE("%s: clone_displays set, but DCE %" B_PRIu8 " has no PLL "
-			"allocator - driving head 0 only\n", __func__, info.dceMajor);
+		TRACE("%s: %s set, but DCE %" B_PRIu8 " has no PLL allocator - "
+			"driving head 0 only\n", __func__,
+			span ? "span mode requested" : "clone_displays", info.dceMajor);
 		return headCount;
 	}
 
@@ -298,9 +458,67 @@ select_clone_heads(display_mode* mode, bool* heads)
 		headCount++;
 	}
 
-	TRACE("%s: cloning across %" B_PRIu32 " head(s)\n", __func__, headCount);
+	TRACE("%s: %s across %" B_PRIu32 " head(s)\n", __func__,
+		span ? "spanning" : "cloning", headCount);
 
 	return headCount;
+}
+
+
+/*!	Give each driven head its origin in the shared surface.
+
+	Clone puts every head at (0,0). Horizontal span leaves the left head at 0
+	and starts the right head one screen-width in — that offset, written to
+	VIEWPORT_START by display_crtc_fb_set(), is the entire span mechanism.
+
+	Heads that are not driven are reset to 0 too, so a later single-head mode
+	set cannot inherit a stale offset and scan out from the middle of the
+	surface. */
+static void
+assign_viewport_origins(display_mode* mode, bool* heads, bool span)
+{
+	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
+		gDisplay[id]->viewportOriginX = 0;
+		gDisplay[id]->viewportOriginY = 0;
+	}
+
+	if (!span)
+		return;
+
+	// Collect the driven heads in head order.
+	uint32 driven[MAX_DISPLAY];
+	uint32 drivenCount = 0;
+	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
+		if (heads[id])
+			driven[drivenCount++] = id;
+	}
+
+	if (drivenCount < 2) {
+		// Degraded rather than failed, the same rule clone follows: the mode
+		// still sets, the user just sees the left half of a desktop that
+		// app_server already believes is twice as wide.
+		TRACE("%s: span mode with only %" B_PRIu32 " head(s) - showing the "
+			"left half only\n", __func__, drivenCount);
+		return;
+	}
+
+	uint32 leftHead = driven[0];
+	uint32 rightHead = driven[1];
+
+	// "Swap displays" in Screen preferences, arriving through the settings
+	// tunnel, decides which physical monitor is the left half.
+	if (gInfo->swapDisplays) {
+		uint32 swap = leftHead;
+		leftHead = rightHead;
+		rightHead = swap;
+	}
+
+	gDisplay[leftHead]->viewportOriginX = 0;
+	gDisplay[rightHead]->viewportOriginX = mode->timing.h_display;
+
+	TRACE("%s: span: head %" B_PRIu32 " shows x=0, head %" B_PRIu32 " shows x=%"
+		B_PRIu16 "%s\n", __func__, leftHead, rightHead, mode->timing.h_display,
+		gInfo->swapDisplays ? " (swapped)" : "");
 }
 
 
@@ -380,8 +598,17 @@ radeon_set_display_mode(display_mode* mode)
 	if (!is_mode_supported(mode))
 		return B_BAD_VALUE;
 
+	bool span = is_horizontal_span_mode(mode);
+	if (span) {
+		TRACE("%s: horizontal span requested: %" B_PRIu16 " wide surface, %"
+			B_PRIu16 " per head\n", __func__, mode->virtual_width,
+			mode->timing.h_display);
+	}
+
 	bool heads[MAX_DISPLAY];
-	uint32 headCount = select_clone_heads(mode, heads);
+	uint32 headCount = select_clone_heads(mode, heads, span);
+
+	assign_viewport_origins(mode, heads, span);
 
 	// Clear the recorded mode of every head this configuration will not drive.
 	// display_crtc_fb_set() publishes currentMode for the heads that are
@@ -499,6 +726,163 @@ radeon_get_display_mode(display_mode* _currentMode)
 
 	*_currentMode = gInfo->shared_info->current_mode;
 	//*_currentMode = gDisplay[X]->currentMode;
+	return B_OK;
+}
+
+
+/*!	Is this ProposeMode call actually a multi-monitor settings request?
+
+	Screen preferences smuggles settings through B_PROPOSE_DISPLAY_MODE by
+	handing us a display_mode that could never be a real mode. Recognising it
+	has to be exact — a false positive would silently eat a legitimate mode
+	proposal. See multimon_tunnel.h for the protocol. */
+static bool
+is_multimon_tunnel(const display_mode* target, const display_mode* low,
+	const display_mode* high)
+{
+	return target->space == 0 && low->space == 0 && high->space == 0
+		&& low->virtual_width == 0xffff && low->virtual_height == 0xffff
+		&& high->virtual_width == 0 && high->virtual_height == 0
+		&& target->timing.pixel_clock == 0
+		&& low->timing.pixel_clock == RADEON_TUNNEL_SENTINEL_LOW
+		&& high->timing.pixel_clock == RADEON_TUNNEL_SENTINEL_HIGH;
+}
+
+
+/*!	Service one tunneled multi-monitor setting.
+
+	Only swap-displays is answered. Use-laptop-panel and TV-standard are
+	refused rather than faked: refusing makes Screen preferences hide those
+	controls, which is honest, whereas answering would advertise controls that
+	do nothing. */
+static status_t
+handle_multimon_tunnel(display_mode* target)
+{
+	uint16 setting = target->h_display_start;
+	uint16 operation = target->v_display_start;
+
+	switch (setting) {
+		case RADEON_TUNNEL_SETTING_SWAP:
+			switch (operation) {
+				case RADEON_TUNNEL_OP_GET:
+					target->timing.flags = gInfo->swapDisplays ? 1 : 0;
+					TRACE("%s: tunnel get swap -> %" B_PRIu32 "\n", __func__,
+						target->timing.flags);
+					return B_OK;
+				case RADEON_TUNNEL_OP_SET:
+				{
+					gInfo->swapDisplays = target->timing.flags != 0;
+					TRACE("%s: tunnel set swap -> %s\n", __func__,
+						gInfo->swapDisplays ? "true" : "false");
+					// Screen preferences does not follow a settings change
+					// with its own SetMode, so re-apply the current mode here
+					// or the swap would not take effect until something else
+					// triggers a mode set. Copy it first: the mode set
+					// rewrites shared_info->current_mode as it goes, so
+					// handing it a pointer into that field would have it
+					// reading from something it is concurrently overwriting.
+					display_mode current = gInfo->shared_info->current_mode;
+					return radeon_set_display_mode(&current);
+				}
+			}
+			break;
+
+		case RADEON_TUNNEL_SETTING_USE_LAPTOP_PANEL:
+			// Panels are ordinary displays here; there is nothing to toggle.
+			return B_ERROR;
+
+		case RADEON_TUNNEL_SETTING_TV_STANDARD:
+			// No TV-out support in this driver.
+			return B_ERROR;
+	}
+
+	TRACE("%s: unhandled tunnel setting %#" B_PRIx16 ", operation %" B_PRIu16
+		"\n", __func__, setting, operation);
+	return B_ERROR;
+}
+
+
+/*!	B_PROPOSE_DISPLAY_MODE — adjust a requested mode to something this card can
+	actually drive, or refuse it.
+
+	Two unrelated jobs, because Screen preferences overloads this one hook.
+	First the multi-monitor settings tunnel, including the support handshake
+	that decides whether the "Combine displays" menu is visible at all
+	(multimon_tunnel.h). Then ordinary mode proposal.
+
+	The mode-proposal half deliberately does not invent timings. The offered
+	mode list is already built and filtered from EDID, so the useful answer is
+	"the closest listed mode that fits between low and high", and refusing
+	anything else keeps this hook honest about the per-chip pixel-clock caps
+	that is_mode_supported() enforces. */
+status_t
+radeon_propose_display_mode(display_mode* target, const display_mode* low,
+	const display_mode* high)
+{
+	TRACE("%s\n", __func__);
+
+	if (target == NULL || low == NULL || high == NULL)
+		return B_BAD_VALUE;
+
+	// The support handshake. Screen preferences sets REQUEST on a real mode
+	// and reads back REPLY; answering it is what makes the combine UI appear.
+	// Checked before the sentinel test because the probe rides on a genuine
+	// mode rather than the magic one.
+	if ((target->timing.flags & RADEON_MODE_MULTIMON_REQUEST) != 0
+		&& (target->timing.flags & RADEON_MODE_MULTIMON_REPLY) == 0) {
+		target->timing.flags &= ~RADEON_MODE_MULTIMON_REQUEST;
+		target->timing.flags |= RADEON_MODE_MULTIMON_REPLY;
+		TRACE("%s: answered multi-monitor support handshake\n", __func__);
+		return B_OK;
+	}
+
+	if (is_multimon_tunnel(target, low, high))
+		return handle_multimon_tunnel(target);
+
+	// Ordinary mode proposal. Find the listed mode that matches the requested
+	// virtual size and color space; fall back to the closest refresh rate
+	// among modes of that size.
+	const display_mode* best = NULL;
+	for (uint32 i = 0; i < gInfo->shared_info->mode_count; i++) {
+		const display_mode* candidate = &gInfo->mode_list[i];
+
+		if (candidate->virtual_width != target->virtual_width
+			|| candidate->virtual_height != target->virtual_height
+			|| candidate->space != target->space)
+			continue;
+
+		if (candidate->timing.pixel_clock < low->timing.pixel_clock
+			|| candidate->timing.pixel_clock > high->timing.pixel_clock)
+			continue;
+
+		if (best == NULL) {
+			best = candidate;
+			continue;
+		}
+
+		// Prefer the candidate whose pixel clock is closest to what was asked
+		// for, so a request carrying a refresh rate is honored where possible.
+		uint32 bestDelta = best->timing.pixel_clock > target->timing.pixel_clock
+			? best->timing.pixel_clock - target->timing.pixel_clock
+			: target->timing.pixel_clock - best->timing.pixel_clock;
+		uint32 candidateDelta
+			= candidate->timing.pixel_clock > target->timing.pixel_clock
+				? candidate->timing.pixel_clock - target->timing.pixel_clock
+				: target->timing.pixel_clock - candidate->timing.pixel_clock;
+
+		if (candidateDelta < bestDelta)
+			best = candidate;
+	}
+
+	if (best == NULL) {
+		TRACE("%s: no supported mode matches %" B_PRIu16 "x%" B_PRIu16
+			" space %#" B_PRIx32 "\n", __func__, target->virtual_width,
+			target->virtual_height, target->space);
+		return B_ERROR;
+	}
+
+	*target = *best;
+
 	return B_OK;
 }
 

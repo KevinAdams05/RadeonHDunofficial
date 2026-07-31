@@ -94,6 +94,13 @@ struct accelerant_info {
 
 	uint32			lvdsSpreadSpectrumID;
 
+	// "Swap displays" from Screen preferences, arriving through the
+	// multi-monitor settings tunnel (multimon_tunnel.h). Decides which head
+	// shows the left half of a horizontal span; ignored when only one head is
+	// driven. Not persisted — Screen preferences re-applies it from the saved
+	// display_mode, the same way the old radeon driver's setting behaved.
+	bool			swapDisplays;
+
 	RingQueue*		ringQueue[RADEON_QUEUE_MAX]; // Ring buffer command processor
 };
 
@@ -213,6 +220,16 @@ typedef struct {
 	edid1_info		edidData;
 	display_mode	preferredMode;
 	display_mode	currentMode;
+
+	// Where in the shared framebuffer this head starts scanning out, in
+	// pixels. Zero for every head under clone, since all heads show the same
+	// top-left corner. Under horizontal span the right-hand head gets
+	// viewportOriginX = timing.h_display, which is the whole span mechanism:
+	// one surface of virtual_width, two CRTCs reading different halves of it.
+	// Set by radeon_set_display_mode() before programming each head and
+	// consumed by display_crtc_fb_set().
+	uint16			viewportOriginX;
+	uint16			viewportOriginY;
 } display_info;
 
 

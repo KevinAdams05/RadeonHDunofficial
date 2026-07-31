@@ -45,6 +45,11 @@ radeon_gpu_probe()
 	gInfo->displayClockFrequency = 0;
 	gInfo->dpExternalClock = 0;
 
+	// gInfo comes from malloc(), not calloc(), so every field we rely on has
+	// to be given a value before first use — same reason the two above are
+	// cleared here rather than assumed zero.
+	gInfo->swapDisplays = false;
+
 	int index = GetIndexIntoMasterTable(DATA, FirmwareInfo);
 	if (atom_parse_data_header(gAtomContext, index, NULL,
 		&tableMajor, &tableMinor, &tableOffset) != B_OK) {

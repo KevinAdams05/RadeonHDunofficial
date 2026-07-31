@@ -900,6 +900,13 @@ display_crtc_fb_set(uint8 crtcID, display_mode* mode)
 		mode->timing.h_display, mode->timing.v_display, bitsPerPixel);
 	TRACE("%s: fb pitch: %" B_PRIu32 " \n", __func__, widthAligned);
 
+	// This head's origin within the shared surface. Zero for a single head and
+	// for every head under clone; under horizontal span the right-hand head
+	// starts one screen-width in, which is what makes two CRTCs show two
+	// halves of one desktop. See display_info::viewportOriginX.
+	uint32 originX = gDisplay[crtcID]->viewportOriginX;
+	uint32 originY = gDisplay[crtcID]->viewportOriginY;
+
 	Write32(CRT, regs->grphSurfaceOffsetX, 0);
 	Write32(CRT, regs->grphSurfaceOffsetY, 0);
 	Write32(CRT, regs->grphXStart, 0);
@@ -916,7 +923,12 @@ display_crtc_fb_set(uint8 crtcID, display_mode* mode)
 	uint32 viewportWidth = mode->timing.h_display;
 	uint32 viewportHeight = (mode->timing.v_display + 1) & ~1;
 
-	Write32(CRT, regs->viewportStart, 0);
+	if (originX != 0 || originY != 0) {
+		TRACE("%s: crtc %" B_PRIu8 " viewport origin (%" B_PRIu32 ", %"
+			B_PRIu32 ")\n", __func__, crtcID, originX, originY);
+	}
+
+	Write32(CRT, regs->viewportStart, (originX << 16) | originY);
 	Write32(CRT, regs->viewportSize,
 		(viewportWidth << 16) | viewportHeight);
 
