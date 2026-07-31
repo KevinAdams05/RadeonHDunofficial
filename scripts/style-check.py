@@ -15,12 +15,15 @@ scripts/style-baseline.txt and reported as "known", so the gate can require
 zero *new* findings from day one instead of waiting on a cleanup. Fix a
 baselined finding and `--update-baseline` will drop it.
 
+Invoke through python3: this repo keeps core.fileMode false, so nothing
+under scripts/ carries an executable bit.
+
 Usage:
-  scripts/style-check.py                  # check everything, honour baseline
-  scripts/style-check.py --all            # ignore the baseline, show all
-  scripts/style-check.py --changed[=REF]  # only files changed vs REF (HEAD)
-  scripts/style-check.py --update-baseline
-  scripts/style-check.py --list-rules
+  python3 scripts/style-check.py                  # honour the baseline
+  python3 scripts/style-check.py --all            # show baselined too
+  python3 scripts/style-check.py --changed[=REF]  # files changed vs REF
+  python3 scripts/style-check.py --update-baseline
+  python3 scripts/style-check.py --list-rules
 
 Exit status is 0 when there are no new findings, 1 otherwise, so it can gate
 a release directly.

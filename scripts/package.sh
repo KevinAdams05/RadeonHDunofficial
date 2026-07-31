@@ -86,7 +86,10 @@ if [ "${SKIP_GATE:-0}" = "1" ]; then
 	echo ""
 else
 	echo "==> Pre-release gate: style"
-	if ! "$REPO_ROOT/scripts/style-check.py"; then
+	# Invoked through python3 on purpose: this repo keeps core.fileMode
+	# false, so nothing under scripts/ carries an executable bit and a
+	# fresh clone cannot run the checker directly.
+	if ! python3 "$REPO_ROOT/scripts/style-check.py"; then
 		echo "" >&2
 		echo "ERROR: style-check reported new findings (above)." >&2
 		echo "       Fix them, or if they are genuinely acceptable," >&2
