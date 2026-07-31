@@ -34,9 +34,10 @@
 #include "utility.h"
 
 
+extern "C" void _sPrintf(const char* format, ...);
+
 #define TRACE_MODE
 #ifdef TRACE_MODE
-extern "C" void _sPrintf(const char* format, ...);
 #	define TRACE(x...) _sPrintf("radeon_hd: " x)
 #else
 #	define TRACE(x...) ;
@@ -228,9 +229,11 @@ radeon_set_display_mode(display_mode* mode)
 	// *** CRT controler mode set
 	// Set up PLL for connector
 	pll_pick(connectorIndex);
+#ifdef TRACE_MODE
 	pll_info* pll = &gConnector[connectorIndex]->encoder.pll;
 	TRACE("%s: pll %d selected for connector %" B_PRIu32 "\n", __func__,
 		pll->id, connectorIndex);
+#endif
 	pll_set(mode, crtcID);
 
 	display_crtc_set_dtd(crtcID, mode);

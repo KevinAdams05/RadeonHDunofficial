@@ -29,9 +29,10 @@
 #include "encoder.h"
 
 
+extern "C" void _sPrintf(const char* format, ...);
+
 #define TRACE_DISPLAY
 #ifdef TRACE_DISPLAY
-extern "C" void _sPrintf(const char* format, ...);
 #   define TRACE(x...) _sPrintf("radeon_hd: " x)
 #else
 #   define TRACE(x...) ;

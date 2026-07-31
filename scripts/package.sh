@@ -20,6 +20,10 @@
 #   scripts/package.sh [VERSION]
 #
 # VERSION defaults to a date-based tag like 0.0.YYYYMMDD if not given.
+#
+# A pre-release gate runs before staging: style-check must report no new
+# findings, and neither binary may be older than the newest tracked
+# source. SKIP_GATE=1 bypasses it (loudly) for emergencies.
 
 set -euo pipefail
 
@@ -30,14 +34,15 @@ VERSION="${1:-${VERSION:-0.0.$(date +%Y%m%d)}}"
 # `package create` is a host tool built as part of Haiku. On Linux it is
 # not on $PATH; locate the host-build copy alongside the cross-tools.
 HAIKU_SRC="${HAIKU_SRC:-$HOME/haiku-build/haiku}"
-HOST_PACKAGE="${HOST_PACKAGE:-$HAIKU_SRC/generated.$ARCH/objects/linux/x86_64/release/tools/package/package}"
+HOST_OBJECTS="$HAIKU_SRC/generated.$ARCH/objects/linux/x86_64/release"
+HOST_PACKAGE="${HOST_PACKAGE:-$HOST_OBJECTS/tools/package/package}"
 if ! command -v package >/dev/null 2>&1; then
 	if [ -x "$HOST_PACKAGE" ]; then
 		PACKAGE_CMD="$HOST_PACKAGE"
 	else
 		echo "ERROR: 'package' tool not found." >&2
 		echo "       Looked for: $HOST_PACKAGE" >&2
-		echo "       Set HOST_PACKAGE to the host-built Haiku 'package' binary." >&2
+		echo "       Set HOST_PACKAGE to the host-built 'package'." >&2
 		exit 1
 	fi
 else
@@ -55,6 +60,78 @@ if [ ! -f "$ACCELERANT" ] || [ ! -f "$KERNEL_DRV" ]; then
 	echo "ERROR: Built binaries missing in $BUILD_DIR" >&2
 	echo "       Run scripts/build.sh first." >&2
 	exit 1
+fi
+
+# ---------------------------------------------------------------------
+# Pre-release gate
+#
+# Two checks, each guarding a mistake that has actually shipped or
+# nearly shipped from this repo:
+#
+#   style      scripts/style-check.py must report no *new* findings
+#              against scripts/style-baseline.txt.
+#
+#   staleness  neither binary may be older than the newest tracked
+#              source file. jam prints little on a no-op build, so a
+#              failed or skipped compile looks exactly like a good one
+#              and it is easy to package the previous binary by
+#              accident.
+#
+# Set SKIP_GATE=1 to bypass both. That is for emergencies only: it is
+# reported loudly and should never be how a release is cut.
+# ---------------------------------------------------------------------
+if [ "${SKIP_GATE:-0}" = "1" ]; then
+	echo "!!! PRE-RELEASE GATE BYPASSED (SKIP_GATE=1)" >&2
+	echo "!!! Style and staleness were NOT verified." >&2
+	echo ""
+else
+	echo "==> Pre-release gate: style"
+	if ! "$REPO_ROOT/scripts/style-check.py"; then
+		echo "" >&2
+		echo "ERROR: style-check reported new findings (above)." >&2
+		echo "       Fix them, or if they are genuinely acceptable," >&2
+		echo "       record them with:" >&2
+		echo "         scripts/style-check.py --update-baseline" >&2
+		exit 1
+	fi
+
+	echo "==> Pre-release gate: artifact staleness"
+	NEWEST_SOURCE=""
+	NEWEST_MTIME=0
+	# Prefer git, but fall back to find: a release may be built from an
+	# unpacked tarball that has no .git directory.
+	if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+		list_sources() {
+			git -C "$REPO_ROOT" ls-files 'src/*' 'headers/*'
+		}
+	else
+		list_sources() {
+			cd "$REPO_ROOT" && find src headers \
+				\( -name '*.c' -o -name '*.cpp' -o -name '*.h' \) -type f
+		}
+	fi
+	while IFS= read -r source_file; do
+		[ -f "$REPO_ROOT/$source_file" ] || continue
+		mtime="$(stat -c %Y "$REPO_ROOT/$source_file")"
+		if [ "$mtime" -gt "$NEWEST_MTIME" ]; then
+			NEWEST_MTIME="$mtime"
+			NEWEST_SOURCE="$source_file"
+		fi
+	done < <(list_sources)
+
+	for binary in "$ACCELERANT" "$KERNEL_DRV"; do
+		binary_mtime="$(stat -c %Y "$binary")"
+		if [ "$binary_mtime" -lt "$NEWEST_MTIME" ]; then
+			echo "ERROR: $(basename "$binary") is older than" >&2
+			echo "       $NEWEST_SOURCE." >&2
+			echo "       The binary predates the source it should" >&2
+			echo "       contain. Re-run scripts/build.sh and confirm" >&2
+			echo "       it exits 0." >&2
+			exit 1
+		fi
+	done
+	echo "    both binaries are newer than $NEWEST_SOURCE"
+	echo ""
 fi
 
 echo "==> Staging package contents in $STAGING"

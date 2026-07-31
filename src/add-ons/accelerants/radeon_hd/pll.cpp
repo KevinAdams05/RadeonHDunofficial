@@ -26,9 +26,10 @@
 #include "utility.h"
 
 
+extern "C" void _sPrintf(const char* format, ...);
+
 #define TRACE_PLL
 #ifdef TRACE_PLL
-extern "C" void _sPrintf(const char* format, ...);
 #   define TRACE(x...) _sPrintf("radeon_hd: " x)
 #else
 #   define TRACE(x...) ;
@@ -993,7 +994,7 @@ pll_set(display_mode* mode, uint8 crtcID)
 			// upper-level mode-set path surfaces a real error instead
 			// of silently programming bad PLL state.
 			ERROR("%s: unsupported SetPixelClock table version %"
-				B_PRIu8 ".%" B_PRIu8 " — PLL programming aborted\n",
+				B_PRIu8 ".%" B_PRIu8 " - PLL programming aborted\n",
 				__func__, tableMajor, tableMinor);
 			return B_ERROR;
 	}

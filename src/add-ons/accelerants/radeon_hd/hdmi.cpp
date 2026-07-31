@@ -15,10 +15,11 @@
 #include "accelerant_protos.h"
 
 
+extern "C" void _sPrintf(const char* format, ...);
+
 #undef TRACE
 #define TRACE_HDMI
 #ifdef TRACE_HDMI
-extern "C" void _sPrintf(const char* format, ...);
 #	define TRACE(x...) _sPrintf("radeon_hd: " x)
 #else
 #	define TRACE(x...) ;
@@ -324,6 +325,12 @@ hdmi_avi_infoframe_disable(uint8 crtcID)
 void
 hdmi_registers_dump(uint8 crtcID, const char* stage)
 {
+#ifndef TRACE_HDMI
+	// The whole body is diagnostics, so with tracing compiled out there
+	// is nothing to do and the locals would go unused (STYLE_GUIDE §18).
+	(void)crtcID;
+	(void)stage;
+#else
 	radeon_shared_info& info = *gInfo->shared_info;
 
 	if (info.chipsetID < RADEON_CEDAR)
@@ -362,6 +369,7 @@ hdmi_registers_dump(uint8 crtcID, const char* stage)
 		Read32(OUT, EVERGREEN_AFMT_AVI_INFO1 + afmtOffset),
 		Read32(OUT, EVERGREEN_AFMT_AVI_INFO2 + afmtOffset),
 		Read32(OUT, EVERGREEN_AFMT_AVI_INFO3 + afmtOffset));
+#endif
 }
 
 

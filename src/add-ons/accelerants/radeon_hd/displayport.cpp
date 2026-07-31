@@ -612,12 +612,15 @@ dp_get_adjust_train(dp_info* dp)
 {
 	TRACE("%s\n", __func__);
 
+#ifdef TRACE_DP
+	// Only ever used to decorate the TRACE below (STYLE_GUIDE §18).
 	const char* voltageNames[] = {
 		"0.4V", "0.6V", "0.8V", "1.2V"
 	};
 	const char* preEmphasisNames[] = {
 		"0dB", "3.5dB", "6dB", "9.5dB"
 	};
+#endif
 
 	uint8 voltage = 0;
 	uint8 preEmphasis = 0;
