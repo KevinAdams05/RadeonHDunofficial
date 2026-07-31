@@ -1,6 +1,3 @@
->[!NOTE]
->An LLM was used to aid in development of this code.
-
 # Building & Packaging
 
 Maintainer-facing notes for producing a `.hpkg` of the RadeonHD

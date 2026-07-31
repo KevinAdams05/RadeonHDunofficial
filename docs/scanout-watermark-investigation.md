@@ -1,12 +1,14 @@
->[!NOTE]
->An LLM was used to aid in development of this code.
-
 # Scanout Watermark / Bandwidth Arbitration — Investigation Prep
 
-**Date:** 2026-06-04, Phase B implemented 2026-07-30
-**Status:** Phase A complete — thesis confirmed on hardware (see §8).
-Phase B implemented and building clean (see §9); **awaiting hardware
-test**. Phase C (retest the ceilings) is blocked on that test.
+**Date:** 2026-06-04; Phase B implemented 2026-07-30; Phase D + PowerPlay
+sweep 2026-07-31
+**Status:** Phase A complete (§8). Phase B implemented and **verified on
+Turks (DCE 5) and Cedar (DCE 4)** (§9). **Phase C superseded** — the
+PowerPlay sweep showed the caps are a power-management problem, not a
+watermark one: **both capped cards tested (Turks, Barts) are parked at
+their lowest memory clock, and the one uncapped card (Cedar) is at its
+highest.** Next: Caicos to complete the sweep, then the clock/voltage
+write path. See §9 "Sweep complete on three cards".
 **Target bug:** stride-aliased scanout corruption above the per-chip
 pixel-clock caps (Caicos 165 MHz, Turks 250 MHz, Barts 340 MHz; see
 `mode.cpp` and CHANGELOG 0.4.0 / 0.5.0 / 0.6.2)
@@ -526,6 +528,140 @@ defaults. Probe those before drawing any Phase C conclusion.
 *(Resolved above: hypothesis 1. Kept because the reasoning that led to the
 probe is the useful part of the record.)*
 
+### Phase D result (2026-07-31, Cedar HD 5450, DCE 4, 1080p HDMI) — PASS
+
+The DCE 4 path programs correctly, and behaves differently from DCE 5 in
+exactly the ways it should:
+
+| Register | VBIOS-left | After update | |
+|---|---|---|---|
+| `DC_LB_MEMORY_SPLIT` CRTC 0 | `0x00040000` (bits[2:0] = 0) | **`0x00070002`** (= 2, whole buffer) | ✅ |
+| `DC_LB_MEMORY_SPLIT` CRTC 1 | `0x00000004` | `0x00000004` (second half) | ✅ |
+| `LATENCY_CONTROL` | `0x00000000` | **`0x39de1740`** | ✅ = 5952 ns / 14814 ns, matches computed |
+| `PRIORITY_A/B_CNT` | `0x00000000` | **`0x37`** = 55 | ✅ matches computed mark |
+| `DMIF_BUFFER_CONTROL` | `0x00000000` | `0x00000000` | ✅ **correctly skipped on DCE 4** |
+
+`bandwidth_update` reported 2 DRAM channels, available 2239 MB/s, display
+share 959 MB/s, mode average 518 MB/s — within rounding of the 2240 / 960 /
+518 the pre-test harness predicted. The DCE 4 line-buffer sizes and the
+DMIF gate both behave as designed.
+
+### ✅ Sweep complete on three cards — the correlation holds 3/3
+
+**Read the Cedar section below in light of this one.** Cedar alone looked
+like a refutation; with Barts in hand it is the *control*.
+
+| Card | Pixel-clock cap | Clocks in use | PowerPlay memory range | Sitting at |
+|---|---|---|---|---|
+| Turks HD 6570 | 250 MHz | 100 / **150** MHz | 200 – 900 MHz | **lowest** |
+| Barts HD 6850 | 340 MHz | 100 / **150** MHz | 150 – **1000** MHz | **lowest** |
+| Cedar HD 5450 | **none** | 650 / **400** MHz | 200 – 400 MHz | **highest** |
+
+**Both capped cards are parked at their lowest memory clock. The uncapped
+card is at its highest.** Cedar has no cap precisely because it is already
+running flat out — 400 MHz is its ceiling, not a power state it is stuck
+below. Three for three.
+
+Barts detail (`PowerPlay table 5.1, 304 bytes`, 4 levels):
+
+```
+  level 0: engine 775000 kHz, memory 1000000 kHz, VDDC 65281 mV, VDDCI 1100 mV
+  level 1: engine 100000 kHz, memory  150000 kHz, VDDC   950 mV, VDDCI  950 mV
+  level 2: engine 600000 kHz, memory 1000000 kHz, VDDC  1100 mV, VDDCI 1100 mV
+  level 3: engine 300000 kHz, memory 1000000 kHz, VDDC   950 mV, VDDCI 1100 mV
+running at the LOWEST advertised memory clock (150000 of up to 1000000 kHz)
+  - scanout bandwidth is at its floor
+bandwidth: available 2559 MB/s, display share 1440 MB/s, mode average 518 MB/s
+```
+
+Level 0 is exactly the HD 6850's spec (775 MHz core, 1000 MHz GDDR5), so the
+card can reach 1000 MHz memory and is sitting at 150.
+
+Two things worth noting from the numbers:
+
+- **Barts is the first card where the *engine* clock binds, not DRAM.** At
+  level 1, `dram_bw` = 3360 MB/s but `data_return_bw` = 32 × 99990 × 0.8 =
+  2559 MB/s, so available is 2559. Raising memory alone would not help this
+  board; engine clock has to come up too.
+- **At level 1, 4K@60 would trip `PRIORITY_ALWAYS_ON`.** Its 1861 MB/s
+  average exceeds the 1440 MB/s display share (0.3 × dram). At level 0 or 2
+  available becomes 13824 MB/s (DMIF-bound) against a 9600 MB/s share, and
+  4K@60 sits comfortably inside. So raising Barts off level 1 gives roughly
+  **5.4x the usable scanout bandwidth** and puts the 4K@60 reproducer well
+  within budget. **The power-management case is now strong.**
+
+### ⚠️ Prerequisite discovered for the PM work: `usVDDC` is not always mV
+
+Barts level 0 reports **`VDDC 65281 mV` = `0xFF01`**, which is plainly not a
+millivolt value, while levels 1–3 read sane (950 / 1100 / 950). So
+`ATOM_PPLIB_EVERGREEN_CLOCK_INFO::usVDDC` is sometimes an **index / VID with
+a sentinel high byte** rather than a direct voltage. Any voltage-setting
+implementation **must detect and handle the indexed form** — programming
+65281 as millivolts would be meaningless at best. Good that this surfaced in
+a read-only dump rather than in the write path.
+
+### Operational: Barts needs the fork's *kernel driver*, not just the accelerant
+
+The first Barts boot fell through to the `framebuffer` driver and produced no
+accelerant output at all. Cause: hrev59697 has the HD 6850 entry **compiled
+out**:
+
+```c
+#if 0
+	// Not working: #8765
+	{0x6739, 5, 0, RADEON_BARTS, CHIP_STD, "Radeon HD 6850"},
+#endif
+```
+
+The fork enables it. So testing Barts requires the fork's kernel driver
+staged at `~/config/non-packaged/add-ons/kernel/drivers/{bin,dev/graphics}/`
+— an accelerant-only override is not enough, because the driver never binds
+and the accelerant is therefore never loaded. Worth remembering for any card
+whose upstream entry is gated.
+
+### Cedar in isolation looked like a refutation
+
+Cedar's PowerPlay table (5.1, 248 bytes) and its live clocks:
+
+```
+clocks (in use): engine 649890 kHz, memory 399930 kHz, display 600000 kHz
+
+  level 0: engine 650000 kHz, memory 400000 kHz, VDDC 1000 mV
+  level 1: engine 157000 kHz, memory 200000 kHz, VDDC  900 mV
+  level 2: engine 400000 kHz, memory 400000 kHz, VDDC  950 mV
+  level 3: engine 157000 kHz, memory 400000 kHz, VDDC 1000 mV
+  level 4: engine 400000 kHz, memory 400000 kHz, VDDC 1000 mV
+5 level(s): engine 157000 - 650000 kHz, memory 200000 - 400000 kHz
+```
+
+**Cedar is running at level 0 — its highest state.** The "running at the
+LOWEST advertised memory clock" warning correctly did *not* fire. Its
+400 MHz memory clock is simply this card's maximum (an HD 5450 is the
+cheapest Evergreen part), so its 2239 MB/s is a **genuine hardware ceiling
+with no headroom to recover**.
+
+Consequences:
+
+1. Cedar is genuinely at its top state — but see the completed sweep
+   above: it is the **control**, not a counterexample. It has no
+   pixel-clock cap because it is already at full speed. The correlation
+   "capped <=> parked low" holds on all three cards tested.
+2. **The value of power management is still card-specific.** It would take
+   Turks from 1679 to 10080 MB/s and Barts from 2559 to 13824 MB/s. It
+   would do *nothing* for Cedar, which has no headroom and needs none.
+3. Cedar is consistent either way: it carries no pixel-clock cap in
+   `mode.cpp`, and 1080p needs 518 MB/s against 2239 available.
+4. Barts has since answered the open question — it *is* parked low (and a
+   GDDR5 part after all, contrary to the pre-test guess). Caicos remains
+   the one untested capped card; the prediction is that it is parked low
+   too.
+
+Implementation note worth keeping: the dump printed `5 clock level(s) but
+4 state(s)`. Deriving the entry count from the span between
+`usClockInfoArrayOffset` and `usNonClockInfoArrayOffset` rather than from
+`ucNumStates` was therefore the right call — trusting `ucNumStates` would
+have silently hidden level 4.
+
 ### Deployment note (packagefs)
 
 Dropping the `.hpkg` in `~/config/packages/` did **not** activate on
@@ -548,29 +684,29 @@ launch_daemon respawns within a second.
 work while the card runs at its boot power state (see the resolved clock
 question above). Revised plan:
 
-1. ✅ **Confirm the clock reading** — done, via the PowerPlay table
-   (above). No Linux cross-check required.
-2. **Phase D regression** (unchanged, still worth doing): Cedar 1080p
-   HDMI on the DCE 4 path — different LB sizes, no DMIF handshake.
-   Verifies Phase B did not break the low-bandwidth case. Needs a card
-   swap.
-3. **New investigation: clock / power management.** The PowerPlay reader
-   is now in place; what remains is the write side — set voltage first,
-   then engine and memory clocks, targeting **level 2** (§ above). Needs
-   its own prep document covering the AtomBIOS `SetVoltage` /
-   `SetEngineClock` / `SetMemoryClock` sequence, the safe ordering, and
-   what happens on a board whose table lists no mid level. This is what
-   lifts the pixel-clock caps, and it is also what gives Track A span
-   modes their bandwidth headroom.
-4. **Only then** retest the caps, with watermarks recomputed from the
-   raised clocks. Phase B already recomputes automatically — the
-   watermarks are derived from `gInfo->memoryClockFrequency`, so raising
-   the clocks feeds through with no further change to `bandwidth.cpp`.
-
-Also worth extending: run `powerplay_dump_performance_levels()` on Cedar,
-Caicos and Barts during the Phase D swap. If every board is parked at its
-lowest level, that is a single root cause behind all three pixel-clock
-caps and makes the power-management case decisively.
+1. ✅ **Confirm the clock reading** — done, via the PowerPlay table.
+   No Linux cross-check required.
+2. ✅ **Phase D regression** — done 2026-07-31 on Cedar. DCE 4 path
+   verified; DMIF correctly skipped.
+3. **Finish the PowerPlay sweep — now the deciding step.** Cedar (top
+   state) and Turks (bottom state) disagree, so:
+   - **Barts HD 6850** — highest value. The 4K@60 reproducer, 8-channel
+     GDDR5, 340 MHz cap. GDDR5 parts often do not park memory low.
+   - **Caicos HD 7470** — 2-channel DDR3, 165 MHz cap. Top state would
+     mean its cap is a genuine hardware limit PM cannot fix.
+   No code needed; the probe runs at every attach.
+4. **Then decide on power management**, informed by 3. The write side is
+   voltage-first, then engine and memory clocks. Target the lowest level
+   that reaches maximum memory clock (on Turks that was level 2 at
+   400/900 @ 1000 mV — full DRAM bandwidth without the top engine clock
+   or voltage). Needs its own prep document for the AtomBIOS
+   `SetVoltage` / `SetEngineClock` / `SetMemoryClock` sequence, the safe
+   ordering, and boards whose table lists no such mid level. Note Cedar's
+   table has five levels and four states, so level enumeration cannot
+   assume `ucNumStates`.
+5. **Only then** retest the caps. Phase B needs no change — its
+   watermarks derive from `gInfo->memoryClockFrequency` and follow raised
+   clocks automatically.
 The syslog should now show non-zero `LATENCY_CONTROL` in the "after"
 dump and a `split bits = 2` (whole buffer) `DC_LB_MEMORY_SPLIT` on
 CRTC 0. If the watermarks read back as zero, check the pipe stride

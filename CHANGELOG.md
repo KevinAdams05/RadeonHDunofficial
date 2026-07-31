@@ -1,6 +1,3 @@
->[!NOTE]
->An LLM was used to aid in development of this code.
-
 # Changelog
 
 All notable changes to the RadeonHD (unofficial) fork are recorded here.

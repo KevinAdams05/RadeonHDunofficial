@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#555"/>
+    </marker>
+    <marker id="ag" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#27ae60"/>
+    </marker>
+    <linearGradient id="h" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#16a085"/>
+      <stop offset="100%" stop-color="#0e6655"/>
+    </linearGradient>
+    <filter id="s" x="-2%" y="-3%" width="104%" height="106%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-color="#00000025"/>
+    </filter>
+    <pattern id="no" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#fdedec"/>
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#e74c3c" stroke-width="2"/>
+    </pattern>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="44" fill="url(#h)" rx="5"/>
+  <text x="500" y="28" text-anchor="middle" fill="white" font-size="16" font-weight="bold">PowerPlay levels as measured, and which one to target</text>
+
+  <!-- ============ BARTS ============ -->
+  <rect x="16" y="58" width="632" height="290" rx="8" fill="#f8f9fa" stroke="#dee2e6" filter="url(#s)"/>
+  <text x="32" y="80" font-weight="bold" font-size="14" fill="#2c3e50">Barts HD 6850 — 8 channels, disp_clk 540 MHz, cap 340 MHz</text>
+  <text x="32" y="98" font-size="11" fill="#7f8c8d">available = min(dram, data_return, dmif); engine clock binds below L2</text>
+
+  <!-- column headers -->
+  <text x="40"  y="124" font-size="11" font-weight="bold" fill="#2c3e50">Level</text>
+  <text x="120" y="124" font-size="11" font-weight="bold" fill="#2c3e50">Engine / Memory</text>
+  <text x="300" y="124" font-size="11" font-weight="bold" fill="#2c3e50">VDDC</text>
+  <text x="368" y="124" font-size="11" font-weight="bold" fill="#2c3e50">VDDCI</text>
+  <text x="440" y="124" font-size="11" font-weight="bold" fill="#2c3e50">available</text>
+  <text x="546" y="124" font-size="11" font-weight="bold" fill="#2c3e50">verdict</text>
+  <line x1="32" y1="130" x2="632" y2="130" stroke="#dee2e6"/>
+
+  <!-- L1 current -->
+  <rect x="32" y="136" width="600" height="34" rx="4" fill="#eaf2f8" stroke="#3498db"/>
+  <text x="40"  y="157" font-size="12" font-weight="bold" fill="#21618c">L1</text>
+  <text x="120" y="157" font-family="Consolas, monospace" font-size="11" fill="#21618c">100 / 150 MHz</text>
+  <text x="300" y="157" font-size="11" fill="#21618c">950</text>
+  <text x="368" y="157" font-size="11" fill="#21618c">950</text>
+  <text x="440" y="157" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#21618c">2559 MB/s</text>
+  <text x="546" y="157" font-size="11" fill="#21618c">card is here</text>
+
+  <!-- L3 target -->
+  <rect x="32" y="176" width="600" height="42" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="40"  y="194" font-size="12" font-weight="bold" fill="#1e8449">L3</text>
+  <text x="120" y="194" font-family="Consolas, monospace" font-size="11" fill="#1e8449">300 / 1000 MHz</text>
+  <text x="300" y="194" font-size="11" font-weight="bold" fill="#1e8449">950</text>
+  <text x="368" y="194" font-size="11" fill="#b9770e">1100</text>
+  <text x="440" y="194" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#1e8449">7680 MB/s (3.0x)</text>
+  <text x="546" y="194" font-size="11" font-weight="bold" fill="#1e8449">★ TARGET</text>
+  <text x="120" y="210" font-size="10" fill="#1e8449">VDDC unchanged — only VDDCI needs raising</text>
+
+  <!-- L2 -->
+  <rect x="32" y="224" width="600" height="34" rx="4" fill="#fef9e7" stroke="#f39c12"/>
+  <text x="40"  y="245" font-size="12" font-weight="bold" fill="#b9770e">L2</text>
+  <text x="120" y="245" font-family="Consolas, monospace" font-size="11" fill="#b9770e">600 / 1000 MHz</text>
+  <text x="300" y="245" font-size="11" fill="#b9770e">1100</text>
+  <text x="368" y="245" font-size="11" fill="#b9770e">1100</text>
+  <text x="440" y="245" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#b9770e">13824 MB/s (5.4x)</text>
+  <text x="546" y="245" font-size="11" fill="#b9770e">follow-up; both rails +150</text>
+
+  <!-- L0 unusable -->
+  <rect x="32" y="264" width="600" height="34" rx="4" fill="url(#no)" stroke="#e74c3c"/>
+  <text x="40"  y="285" font-size="12" font-weight="bold" fill="#c0392b">L0</text>
+  <text x="120" y="285" font-family="Consolas, monospace" font-size="11" fill="#c0392b">775 / 1000 MHz</text>
+  <text x="300" y="285" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#c0392b">0xff01</text>
+  <text x="368" y="285" font-size="11" fill="#c0392b">1100</text>
+  <text x="440" y="285" font-family="Consolas, monospace" font-size="11" fill="#c0392b">13824 (no gain)</text>
+  <text x="546" y="285" font-size="11" font-weight="bold" fill="#c0392b">UNUSABLE — virtual ID</text>
+
+  <text x="32" y="322" font-size="11" fill="#c0392b">0xff01 = ATOM_VIRTUAL_VOLTAGE_ID0: a leakage-binned placeholder, not a voltage. Must never be programmed.</text>
+  <text x="32" y="338" font-size="11" fill="#7f8c8d">L0 buys nothing over L2 anyway — the DMIF ceiling (13824 MB/s) binds first.</text>
+
+  <!-- ============ TURKS + CEDAR ============ -->
+  <rect x="664" y="58" width="320" height="290" rx="8" fill="#f8f9fa" stroke="#dee2e6" filter="url(#s)"/>
+  <text x="680" y="80" font-weight="bold" font-size="14" fill="#2c3e50">Turks HD 6570 — cap 250 MHz</text>
+  <rect x="680" y="92" width="288" height="30" rx="4" fill="#eaf2f8" stroke="#3498db"/>
+  <text x="690" y="112" font-size="11" fill="#21618c">L1  100 / 150  VDDC 900   1679 MB/s ← here</text>
+  <rect x="680" y="128" width="288" height="44" rx="4" fill="#fef9e7" stroke="#f39c12" stroke-width="2"/>
+  <text x="690" y="147" font-size="11" font-weight="bold" fill="#b9770e">L2  400 / 900  VDDC 1000  10080 MB/s</text>
+  <text x="690" y="163" font-size="10" fill="#b9770e">★ target, but needs a VDDC raise (+100 mV)</text>
+  <text x="680" y="190" font-size="11" fill="#7f8c8d">No same-voltage high-memory level exists,</text>
+  <text x="680" y="205" font-size="11" fill="#7f8c8d">so Turks cannot avoid a voltage write.</text>
+  <text x="680" y="220" font-size="11" font-weight="bold" fill="#b9770e">Do Barts first.</text>
+
+  <line x1="680" y1="238" x2="968" y2="238" stroke="#dee2e6"/>
+  <text x="680" y="260" font-weight="bold" font-size="14" fill="#2c3e50">Cedar HD 5450 — no cap</text>
+  <rect x="680" y="272" width="288" height="44" rx="4" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="690" y="291" font-size="11" font-weight="bold" fill="#1e8449">L0  650 / 400  already at TOP</text>
+  <text x="690" y="307" font-size="10" fill="#1e8449">400 MHz is this card's ceiling, not a</text>
+  <text x="690" y="322" font-size="10" fill="#1e8449">state it is stuck below.</text>
+  <text x="680" y="340" font-size="11" font-weight="bold" fill="#c0392b">Must be a NO-OP.</text>
+
+  <!-- ============ SAFE ORDERING ============ -->
+  <rect x="16" y="362" width="968" height="150" rx="8" fill="#eafaf1" stroke="#27ae60" filter="url(#s)"/>
+  <text x="32" y="384" font-weight="bold" font-size="14" fill="#1e8449">Safe transition ordering — voltage leads going up, trails coming down</text>
+
+  <!-- going up -->
+  <text x="40" y="412" font-size="12" font-weight="bold" fill="#1e8449">Raising:</text>
+  <rect x="110" y="398" width="150" height="34" rx="5" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="185" y="419" text-anchor="middle" font-size="11" fill="#1e8449">1. SetVoltage up</text>
+  <line x1="262" y1="415" x2="296" y2="415" stroke="#27ae60" stroke-width="2" marker-end="url(#ag)"/>
+  <rect x="300" y="398" width="170" height="34" rx="5" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="385" y="419" text-anchor="middle" font-size="11" fill="#1e8449">2. SetEngineClock up</text>
+  <line x1="472" y1="415" x2="506" y2="415" stroke="#27ae60" stroke-width="2" marker-end="url(#ag)"/>
+  <rect x="510" y="398" width="170" height="34" rx="5" fill="#d5f5e3" stroke="#27ae60"/>
+  <text x="595" y="419" text-anchor="middle" font-size="11" fill="#1e8449">3. SetMemoryClock up</text>
+  <line x1="682" y1="415" x2="716" y2="415" stroke="#27ae60" stroke-width="2" marker-end="url(#ag)"/>
+  <rect x="720" y="398" width="248" height="34" rx="5" fill="#eafaf1" stroke="#27ae60" stroke-dasharray="4 2"/>
+  <text x="844" y="419" text-anchor="middle" font-size="11" fill="#1e8449">4. Get{Engine,Memory}Clock read-back</text>
+
+  <!-- coming down -->
+  <text x="40" y="456" font-size="12" font-weight="bold" fill="#c0392b">Lowering:</text>
+  <rect x="110" y="442" width="150" height="34" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="185" y="463" text-anchor="middle" font-size="11" fill="#c0392b">1. clocks down</text>
+  <line x1="262" y1="459" x2="296" y2="459" stroke="#e74c3c" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="300" y="442" width="170" height="34" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="385" y="463" text-anchor="middle" font-size="11" fill="#c0392b">2. SetVoltage down</text>
+  <text x="500" y="463" font-size="11" fill="#7f8c8d">— never leave a clock running above the voltage that supports it</text>
+
+  <text x="32" y="494" font-size="11" fill="#1e8449">Abort conditions: unknown SetVoltage table crev · VDDC in 0xff01–0xff08 · already at/above target · read-back did not move.</text>
+
+  <!-- ============ PHASES ============ -->
+  <rect x="16" y="526" width="968" height="158" rx="8" fill="#fef9e7" stroke="#f39c12" filter="url(#s)"/>
+  <text x="32" y="548" font-weight="bold" font-size="14" fill="#b9770e">Phasing — risk climbs only after each step is proven</text>
+
+  <rect x="32" y="560" width="180" height="52" rx="5" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="122" y="578" text-anchor="middle" font-size="12" font-weight="bold" fill="#1e8449">A — probe</text>
+  <text x="122" y="594" text-anchor="middle" font-size="10" fill="#1e8449">table crevs, chosen level</text>
+  <text x="122" y="606" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e8449">NO writes</text>
+
+  <rect x="224" y="560" width="180" height="52" rx="5" fill="#eafaf1" stroke="#27ae60"/>
+  <text x="314" y="578" text-anchor="middle" font-size="12" font-weight="bold" fill="#1e8449">B — engine only</text>
+  <text x="314" y="594" text-anchor="middle" font-size="10" fill="#1e8449">Barts 100→300 MHz</text>
+  <text x="314" y="606" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e8449">no voltage change</text>
+
+  <rect x="416" y="560" width="180" height="52" rx="5" fill="#fef9e7" stroke="#f39c12"/>
+  <text x="506" y="578" text-anchor="middle" font-size="12" font-weight="bold" fill="#b9770e">C — memory</text>
+  <text x="506" y="594" text-anchor="middle" font-size="10" fill="#b9770e">Barts full L3</text>
+  <text x="506" y="606" text-anchor="middle" font-size="10" font-weight="bold" fill="#b9770e">first voltage write (VDDCI)</text>
+
+  <rect x="608" y="560" width="180" height="52" rx="5" fill="#fdedec" stroke="#e74c3c"/>
+  <text x="698" y="578" text-anchor="middle" font-size="12" font-weight="bold" fill="#c0392b">D — Turks</text>
+  <text x="698" y="594" text-anchor="middle" font-size="10" fill="#c0392b">L1 → L2</text>
+  <text x="698" y="606" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">VDDC raise required</text>
+
+  <rect x="800" y="560" width="168" height="52" rx="5" fill="#eaf2f8" stroke="#3498db"/>
+  <text x="884" y="578" text-anchor="middle" font-size="12" font-weight="bold" fill="#21618c">E — caps</text>
+  <text x="884" y="594" text-anchor="middle" font-size="10" fill="#21618c">retest 4K@60, re-derive</text>
+  <text x="884" y="606" text-anchor="middle" font-size="10" fill="#21618c">or remove the caps</text>
+
+  <text x="32" y="636" font-size="11" fill="#b9770e">Whole feature behind a driver setting, default OFF — recovery should be editing one text file, not reinstalling a package.</text>
+  <text x="32" y="654" font-size="11" fill="#b9770e">Writes live in the ACCELERANT, not the kernel driver: a hang there kills app_server but leaves SSH alive and the override removable.</text>
+  <text x="32" y="672" font-size="11" fill="#c0392b">No thermal management is implemented — which is a further argument for the lowest level that does the job, not the fastest one.</text>
+</svg>

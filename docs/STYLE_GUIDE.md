@@ -1,6 +1,3 @@
-> [!NOTE]
-> An LLM was used to aid in development of this code.
-
 # RadeonHD Coding Style Guide
 
 RadeonHD is an **unofficial fork** of Haiku's in-tree `radeon_hd`

@@ -2,7 +2,7 @@ name			radeon_hd_unofficial
 version			@VERSION@-1
 architecture		x86_64
 summary			"Unofficial radeon_hd driver fork with bug fixes for HD 5xxx-RX 5xx cards"
-description		"Drop-in replacement for Haiku's bundled radeon_hd graphics driver, with bug fixes for AMD/ATI GPUs from the Evergreen (HD 5xxx) era through Polaris (RX 4xx/5xx) and APUs (Trinity, Kaveri, Kabini, Mullins, Carrizo, Stoney, Raven). Install per-user by dropping in ~/config/packages/; the loader picks the user-config accelerant ahead of the stock /system path. See https://github.com/KevinAdams05/RadeonHDunofficial for the fix log and tested-hardware table."
+description		"Drop-in replacement for Haiku's bundled radeon_hd graphics driver, with bug fixes for AMD/ATI GPUs from the Evergreen (HD 5xxx) era through Polaris (RX 4xx/5xx) and APUs (Trinity, Kaveri, Kabini, Mullins, Carrizo, Stoney, Raven). Install per-user by dropping in ~/config/packages/; the loader picks the user-config kernel driver and accelerant ahead of the stock /system paths. Both binaries must come from the same build, which the package guarantees. See https://github.com/KevinAdams05/RadeonHDunofficial for the fix log and tested-hardware table."
 packager		"Kevin Adams <kevinadams05@gmail.com>"
 vendor			"Kevin Adams"
 licenses {

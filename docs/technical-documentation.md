@@ -1,7 +1,3 @@
->[!NOTE]
->An LLM was used to aid in development of this code.
-
-
 # RadeonHD (Unofficial) — Technical Documentation
 
 This document is the consolidated technical reference for the RadeonHD
@@ -43,6 +39,11 @@ This document is the consolidated technical reference for the RadeonHD
   - [Bug 3 — byte-shifted AVI infoframe packing](#bug-3--byte-shifted-avi-infoframe-packing)
   - [The elimination ladder](#the-elimination-ladder-test-builds-all-on-the-ax5450)
 - [0.6.3 — Kernel Hardening, DCN Guard, and Instrumentation](#063--kernel-hardening-dcn-guard-and-instrumentation)
+- [0.6.6 — Pending Release](#066--pending-release)
+  - [Display Bandwidth Arbitration on DCE 4/5](#display-bandwidth-arbitration-on-dce-45)
+  - [Clock Probing and the Opt-In Engine-Clock Raise](#clock-probing-and-the-opt-in-engine-clock-raise)
+  - [What the Two Investigations Settled About the Caps](#what-the-two-investigations-settled-about-the-caps)
+  - [Tooling — Style Linter, Release Gate, Line Endings](#tooling--style-linter-release-gate-line-endings)
 - [Proposed: AtomBIOS Robustness](#proposed-atombios-robustness)
 - [Proposed: R600/R700 Hardening](#proposed-r600r700-hardening)
 - [Proposed: NI/Polaris Extensions](#proposed-nipolaris-extensions)
@@ -198,76 +199,128 @@ both sides.
 This is a hard rule for distributing the fork as a `.hpkg`, and for any
 hand-installation that bypasses the package manager.
 
+
 ### Why It Matters
 
-The kernel driver allocates an `accelerant_info` struct (declared in
-`headers/private/graphics/radeon_hd/accelerant.h`) and exposes it to the
-userland accelerant via `clone_area`. Both halves dereference fields off
-that struct directly — there is no marshalling layer, no version
-negotiation, and no padding/reserved-space discipline that would let the
-two sides drift independently.
+The kernel driver creates a `radeon_shared_info` struct (declared in
+`headers/private/graphics/radeon_hd/radeon_hd.h`) in a kernel area and the
+accelerant maps it with `clone_area` on `B_INIT_ACCELERANT`. Both halves
+dereference fields off it directly — there is no marshalling layer, no
+version negotiation, and no padding or reserved-space discipline that
+would let the two sides drift independently.
 
-The fork's initial 0.1.0 patch added an `evergreen_gpu_state` member to
-`accelerant_info` to hold the saved CRTC state used by the new
-Evergreen-specific MC halt/resume path. That changes the in-memory
-layout of `accelerant_info` versus the stock Haiku build:
-
-```
-              Stock build              Fork build
-              ───────────              ──────────
-              accelerant_info {        accelerant_info {
-                  ... shared ...           ... shared ...
-                  shared_info* si;         shared_info* si;
-                  area_id area_*;          area_id area_*;
-                  // (end)              +  evergreen_gpu_state evgState;
-              }                        }
-```
-
-If the kernel driver and accelerant are built from different trees, the
-side that allocated the struct and the side that maps it disagree on
-total size, field offsets, or both. Reads and writes after the divergence
-point land on garbage memory. Symptoms range from immediate crash on
-first `B_ACCELERANT_OPEN` to silent corruption of CRTC state during the
-first mode set.
+If the kernel driver and accelerant are built from trees whose
+`radeon_shared_info` layouts differ, the side that created the area and the
+side that maps it disagree on total size, field offsets, or both. Reads and
+writes past the divergence point land on unrelated memory. Symptoms range
+from an immediate crash on first `B_INIT_ACCELERANT` to silent corruption
+of mode/framebuffer state during the first mode set.
 
 ### Scope of the Constraint
 
-| Header changed | Cross-binary contract? | Mixing risk |
-|----------------|------------------------|-------------|
-| `accelerant.h` (`accelerant_info` struct) | **Yes** | High — layout disagreement → crash/corruption |
-| `evergreen_reg.h` (register defines) | No — values compile into binaries | None |
+| Header | Cross-binary contract? | Mixing risk |
+|---|---|---|
+| `headers/.../radeon_hd.h` (`radeon_shared_info`) | **Yes** — created by the kernel driver, `clone_area`d by the accelerant | **High** — layout disagreement → crash or silent corruption |
+| `src/add-ons/accelerants/radeon_hd/accelerant.h` (`accelerant_info`) | No — accelerant-private | None |
+| `evergreen_reg.h`, `ni_reg.h`, … (register defines) | No — values compile into each binary | None |
 
-Only `accelerant.h` is load-bearing here. Pure register-define headers
-have no cross-binary ABI surface. Future patches that touch
-`accelerant.h` (or any other shared struct in the private header tree)
-must be evaluated against this same constraint.
+`radeon_shared_info` is the only load-bearing struct. `accelerant_info` is
+**not** shared: the accelerant `malloc`s it itself in `init_common()`
+(`accelerant.cpp`), and the kernel driver contains no reference to the type
+at all — verify with
+`grep -r accelerant_info src/add-ons/kernel/drivers/graphics/radeon_hd/`,
+which returns nothing. Fields may be added to `accelerant_info` freely.
+
+Future patches that touch `radeon_hd.h` — or introduce any new struct
+passed through an area — must be evaluated against this constraint.
+
+### Practical Consequence for Testing
+
+Because only `radeon_shared_info` matters, an **accelerant-only override is
+safe whenever that struct is identical between the running kernel driver
+and the tree the accelerant was built from.** This is a genuinely useful
+shortcut: it allows iterating on accelerant changes against a stock system
+driver with nothing but a file copy into
+`~/config/non-packaged/add-ons/accelerants/`, and no reboot.
+
+The fork does not carry `radeon_hd.h` at all, so in practice the check
+reduces to: *did `radeon_hd.h` change between the hrev the target machine
+runs and the tree you built against?*
+
+```
+git diff <target-hrev>..<your-tree> -- \
+    headers/private/graphics/radeon_hd/radeon_hd.h
+```
+
+An empty diff means the shortcut is safe. **Check it — do not assume it.**
+This shortcut is for development only; it is not a supported install
+method, and §Distribution Rules still governs anything shipped.
+
+### Separate Constraint — Device-Table Dependency
+
+This one is not about ABI and cost a build cycle to rediscover on
+2026-07-31. **The fork enables PCI IDs that upstream compiles out.** For
+example hrev59697 carries:
+
+```c
+#if 0
+	// Not working: #8765
+	{0x6739, 5, 0, RADEON_BARTS, CHIP_STD, "Radeon HD 6850"},
+#endif
+```
+
+For any such card the *stock* kernel driver never matches the device, so it
+never binds and never publishes `/dev/graphics/radeon_hd_*`. An
+accelerant-only override is then completely inert — the accelerant is never
+loaded, because nothing opens a device for it.
+
+The failure is **silent**: no crash and no error. Every graphics driver
+declines in turn and the system falls through to `vesa` / `framebuffer`,
+leaving a working but unaccelerated desktop. The tell is
+`/dev/graphics/` containing only `framebuffer`, plus a single
+`radeon_hd: init_hardware` line in the syslog with nothing after it.
+
+So: **testing a card whose upstream entry is gated requires the fork's
+kernel driver as well**, staged at
+`~/config/non-packaged/add-ons/kernel/drivers/bin/radeon_hd` with a
+`dev/graphics/radeon_hd -> ../../bin/radeon_hd` symlink alongside it. When
+in doubt, stage both — the accelerant-only shortcut above is an
+optimisation, not a default.
+
+Diagnostic note: when checking whether an ID is supported, grep is not
+enough — the entry may be present but gated. Check the enclosing
+preprocessor context, or read the built table rather than the source.
 
 ### Distribution Rules
 
 1. **Ship both binaries in the same `.hpkg`, built from the same source
    tree.** Never publish a release that contains only the kernel driver
    or only the accelerant.
-2. **Use install paths that override both atomically.** The
-   `~/config/non-packaged/...` paths in the README satisfy this — the
-   loader picks user paths first for both, so either both override or
-   neither does.
-3. **Do not document or recommend hand-copying individual files.** A
-   user who copies just `radeon_hd.accelerant` from the fork on top of a
-   stock kernel driver (or vice versa) will produce the exact mixed-ABI
-   crash this section warns about.
+2. **Install through the `.hpkg`, so both binaries land together.** Note
+   that the `~/config/non-packaged/...` paths are *independent* — the
+   loader prefers user paths for the kernel driver and for the accelerant
+   separately, so overriding one does **not** imply the other. Only the
+   package makes the pair atomic.
+3. **Do not document or recommend hand-copying individual files to
+   users.** Not because it necessarily crashes — see "Practical
+   Consequence for Testing" above, which permits it for development when
+   `radeon_hd.h` matches — but because a user cannot reasonably be asked
+   to verify that condition, and because half an override silently skips
+   any card whose upstream table entry is gated.
 4. **If a future v2 packaging uses `PROVIDES: radeon_hd compat>=...`**
    semantics with conflict declarations against the stock package, the
    atomic unit must still be both binaries together.
 
 ### Why a Cleaner Cross-Binary Contract Wasn't Used
 
-`accelerant_info` is private to radeon_hd and has always been treated as
-internal — it is not part of any documented Haiku API and there is no
-ABI version field. Adding versioning machinery now would be more
-disruptive than the current rule (ship-both-together), because the
-struct is consumed in dozens of places across the accelerant. The
-ship-both rule costs nothing in practice — both binaries always travel
-together anyway — and avoids any change to the in-tree convention.
+`radeon_shared_info` is private to radeon_hd and has always been treated as
+internal — it is not part of any documented Haiku API and carries no ABI
+version field. Adding versioning machinery now would be more disruptive
+than the current rule (ship-both-together), because the struct is consumed
+in many places on both sides. The ship-both rule costs nothing in practice
+— both binaries always travel together anyway — and avoids any change to
+the in-tree convention.
+
 
 ---
 
@@ -1687,6 +1740,225 @@ instrumentation that powered the magenta-stripe investigation:
   [`scanout-watermark-investigation.md`](scanout-watermark-investigation.md)).
   The 65-line raw DIG block dump used for the A/B encoder-mode diff
   is compiled out behind `TRACE_HDMI_BLOCK_DUMP`.
+
+---
+
+## 0.6.6 — Pending Release
+
+> **Status: complete and hardware-verified, but not yet released.** This
+> section records work that has landed on `main` since 0.6.5 so it is not
+> lost between releases; fold it into `CHANGELOG.md` when 0.6.6 is cut.
+
+**Files:** `src/add-ons/accelerants/radeon_hd/bandwidth.cpp`,
+`bandwidth.h`, `powerplay.cpp`, `powerplay.h` (all new), `gpu.cpp`,
+`mode.cpp`, `accelerant.h`, `Jamfile`;
+`headers/private/graphics/radeon_hd/evergreen_reg.h`, `ni_reg.h`;
+`scripts/style-check.py`, `scripts/style-baseline.txt`,
+`scripts/package.sh`, `.gitattributes`
+**Dates:** 2026-07-30 – 2026-07-31
+
+### Display Bandwidth Arbitration on DCE 4/5
+
+The driver previously left the display memory-arbitration registers exactly
+as the VBIOS posted them — on every card tested the latency watermarks and
+priority counters read back as zero. A new accelerant module,
+`bandwidth.cpp`, programs them at the end of `radeon_set_display_mode()`,
+gated on `dceMajor == 4 || dceMajor == 5`:
+
+- **`bandwidth_line_buffer_adjust()`** programs `DC_LB_MEMORY_SPLIT` —
+  the whole buffer for a lone head, half when both are up, with the
+  mirrored partition for the odd CRTC — drives the DMIF
+  allocate-and-poll handshake on DCE 4.1 / 5, and returns the resulting
+  latency-hiding depth in pixels.
+- **`bandwidth_program_watermarks()`** computes the latency watermark and
+  priority mark, writes both watermark slots (identical, since there is no
+  DPM), restores the original slot selection, and writes
+  `PRIORITY_A/B_CNT`. An inactive CRTC is explicitly zeroed so a previous
+  mode's values cannot linger.
+
+The active-head count keys on `attached && currentMode.timing.pixel_clock
+!= 0` rather than `powered`, because `detect_displays()` marks every
+attached display powered before any mode is set — using `powered` would
+inflate the head count and needlessly halve the first head's line buffer.
+Unit scales are pinned at the top of the file (bandwidths in MB/s, times in
+ns, clocks in kHz, `uint64` intermediates) because the reference material
+mixes fixed-point conventions and a mis-scaled `available_bw` silently
+truncates the chunk time to 0 ns.
+
+Three deliberate deviations from the reference behavior: the priority mark
+is **clamped** rather than masked (a masked overflow would wrap to a
+near-zero lead, the opposite of what a demanding mode needs);
+`bytes_per_pixel` stays 4 even for 15/16-bit modes (overstating it only
+makes the watermarks more conservative); and the DMIF poll is bounded at
+100 × 10 µs with an `ERROR` rather than spinning, so a board that never
+asserts `ALLOCATED_COMPLETED` cannot wedge a mode set.
+
+**Verified on hardware, both display generations:**
+
+| Card | DCE | Mode | Result |
+|---|---|---|---|
+| Turks PRO HD 6570 | 5 | 1600×900 @ 120.3 MHz | PASS — LB split 2/4, `LATENCY_CONTROL` `0x44d21c56` (7254 / 17618 ns), `PRIORITY_A/B_CNT` 54, DMIF acked |
+| Cedar HD 5450 | 4 | 1080p HDMI | PASS — LB split 2, `LATENCY_CONTROL` `0x39de1740` (5952 / 14814 ns), `PRIORITY_A/B_CNT` 55, DMIF correctly skipped |
+
+Both matched the values computed by hand beforehand, and re-running the
+update is idempotent. The pipe stride was confirmed at `0x10`.
+
+#### Bug found on hardware — `DC_LB_MEMORY_SPLIT` field position
+
+The first build wrote the partition through
+`EVERGREEN_DC_LB_MEMORY_CONFIG(x)` — `(x & 0xf) << 20`. On hardware that
+did nothing to bits 23:20 *and* silently cleared CRTC 1's real setting in
+bits 2:0 from 4 to 0, leaving both CRTCs claiming the **first** half of a
+shared line buffer.
+
+Root cause was the **DCE 6 / Southern Islands** field position having been
+copied into the Evergreen defines during the 0.6.0 groundwork — the third
+discrepancy of that family. Linux's `evergreend.h` defines only
+`DC_LB_MEMORY_SPLIT 0x6b0c` with no config macro and writes the bare
+partition number ("specified in bits 2:0"); `sid.h` *does* have
+`DC_LB_MEMORY_CONFIG(x) ((x) << 20)` for the same register address, the
+field having moved on DCE 6. Fixed by deleting the bogus macro, widening
+`EVERGREEN_DC_LB_MEMORY_SPLIT_MASK` to `0x7` (the partition is 0–7 once
+the second-controller `+4` is applied; the old `0x3` was too narrow), and
+writing the bare value. A header comment records why the shifted form must
+not come back.
+
+This bug was **invisible single-head** — CRTC 0's own partition happened to
+stay at "first half", which is survivable. It would have surfaced as the
+second monitor starving under multi-monitor Track A, i.e. exactly the class
+of bug that would have been blamed on the span code.
+
+### Clock Probing and the Opt-In Engine-Clock Raise
+
+A second new module, `powerplay.cpp`, reads what the card is actually doing
+and — only when explicitly enabled — raises it. The driver does no power
+management, so the card runs at whatever clocks the VBIOS posted, which on
+every board tested is a *low* DPM state.
+
+Read-only, always on, called from `radeon_gpu_probe()`:
+
+- `powerplay_engine_clock_current()` / `powerplay_memory_clock_current()`
+  ask the hardware via the AtomBIOS `GetEngineClock` / `GetMemoryClock`
+  command tables. FirmwareInfo's `ulDefault*Clock` are table *defaults*
+  and are not what a board in a low power state is running.
+- `powerplay_dump_performance_levels()` decodes and traces every
+  performance level the PowerPlay table advertises (Evergreen / NI only —
+  the clock-info entry layout differs from DCE 6 on).
+- `powerplay_dump_control_tables()` traces the frev/crev of the command
+  tables a write path must call, plus whether the leakage-voltage data
+  table is present.
+- `powerplay_dump_target_selection()` reports which level the card is on
+  and which one a raise would target, without programming anything.
+
+Write paths are gated in two tiers in
+`~/config/settings/kernel/drivers/radeon_hd`, both default off:
+
+- **`raise_clocks`** — engine clock only. Safe by construction: it only
+  moves to a clock the target level states at the VDDC *already* applied,
+  so no voltage is written.
+- **`raise_memory_clock`** — additionally raises VDDCI and the memory
+  clock. This is the tier that writes a voltage, and it requires
+  `raise_clocks` too, because on a board whose data-return path binds the
+  available bandwidth, raising memory alone achieves nothing.
+
+Order is voltage first, then engine, then memory — a clock must never run
+ahead of the voltage supporting it. The target is decided **once** before
+any write, because with the engine clock alone raised the card sits at a
+clock pair no level advertises and a second lookup would refuse. Each
+clock is confirmed by read-back, and `gInfo->engineClockFrequency` /
+`memoryClockFrequency` are updated so `bandwidth.cpp` recomputes its
+watermarks from the real clocks with no change of its own.
+
+The path refuses rather than guessing when the current clocks match no
+advertised level, when the target needs a different VDDC, when the
+`SetVoltage` table revision takes an index rather than a level, or when a
+voltage field holds a virtual ID (`powerplay_voltage_is_virtual()`).
+
+**Result on Barts HD 6850 (2026-07-31): engine clock 99990 → 299980 kHz —
+3× — with no voltage change, verified by read-back, desktop stable at
+1080p@60 for the soak period.** Available scanout bandwidth went
+2559 → 3360 MB/s (**+31%**), exactly the predicted figure, and the board
+flipped from engine-bound to DRAM-bound.
+
+**Memory reclocking does not work on Northern Islands.** `SetMemoryClock`
+returns success and the clock never moves — not a hang, not corruption, a
+silent no-op. Adding the precondition the reference driver uses
+(`EVERGREEN_CRTC_DISP_READ_REQUEST_DISABLE` on every enabled CRTC around
+the change, via new `powerplay_scanout_requests_disable()` / `_restore()`
+helpers that save and restore the whole `CRTC_CONTROL`) changed nothing.
+The likely reason: Linux reclocks memory on Barts/Turks/Caicos through DPM
+(`btc_dpm.c`), which uploads MC microcode and reprograms `MC_ARB` timings
+around the change, and GDDR5 needs a retraining sequence the legacy table
+cannot perform. Two pieces of robustness were earned by the failure: VDDCI
+is rolled back when the clock does not take, and the read-back check
+refused to publish a clock that had not changed — so `bandwidth.cpp` kept
+computing from an honest 150 MHz rather than a fictional 1000.
+
+A third setting, **`ignore_pixel_clock_cap`**, makes the per-chip caps in
+`mode.cpp` advisory. It exists solely so over-cap modes are reachable when
+re-deriving the caps empirically; it is off by default, it is not a
+supported configuration, and the expected outcome of enabling it is the
+stride-aliased corruption the caps exist to avoid.
+
+### What the Two Investigations Settled About the Caps
+
+The watermark work was undertaken on the theory that the per-chip
+pixel-clock caps existed because display arbitration was never programmed.
+**That theory is now closed, and it was wrong.** The clock probe explains
+the caps instead — and the correlation holds on every board measured:
+
+| Card | Pixel-clock cap | Clocks in use | PowerPlay memory range | Sitting at |
+|---|---|---|---|---|
+| Turks HD 6570 | 250 MHz | 100 / **150** MHz | 200 – 900 MHz | **lowest** |
+| Barts HD 6850 | 340 MHz | 100 / **150** MHz | 150 – **1000** MHz | **lowest** |
+| Caicos XT HD 7470 | 165 MHz | 100 / **155** MHz | 200 – 900 MHz | **below its own lowest** |
+| Cedar HD 5450 | **none** | 650 / **400** MHz | 200 – 400 MHz | **highest** |
+
+Every capped card is parked at (or below) its lowest advertised memory
+clock; the one uncapped card is already at its ceiling. Cedar has no cap
+precisely because 400 MHz *is* its maximum, not a state it is stuck below.
+
+Two things the Caicos measurement added. Its VBIOS posts a state
+(99990 / 154820 kHz) that appears in the PowerPlay table at no level at
+all, so `powerplay_apply_target()` **refuses** — correctly, since the
+applied voltage is then unknown and may be below level 1's 900 mV, making
+an engine raise an overclock at undervoltage. And the raise would gain the
+board nothing regardless: Caicos is DRAM-bound from the start
+(866 MB/s DRAM against 2559 MB/s data-return), where Barts benefited only
+because it was engine-bound. Which tier-1 helps therefore follows from
+which of the two ceilings binds. Caicos is also the first board seen to
+force `PRIORITY_ALWAYS_ON` on real hardware — at plain 1080p60, where its
+518 MB/s mode average exceeds its 371 MB/s display share and the latency
+watermark (16930 ns) exceeds a whole line time (14814 ns) — so the
+forced-priority path modelled during the watermark work is confirmed
+firing, with a clean desktop.
+
+So the caps are genuine bandwidth limits **at the clocks these boards are
+parked at**, and lifting one requires memory reclocking — which the
+paragraph above establishes does not work through the legacy AtomBIOS path
+on Northern Islands. **The caps stay until someone does the DPM/SMC work.**
+Both deliverables here — shipped watermark programming and the opt-in
+engine raise — are real improvements to how the driver treats these
+boards, and neither lifts a cap. Full evidence chains in
+[`scanout-watermark-investigation.md`](scanout-watermark-investigation.md)
+and
+[`power-management-investigation.md`](power-management-investigation.md);
+remaining prerequisites are itemised in [`TODO.md`](TODO.md) item 1.
+
+### Tooling — Style Linter, Release Gate, Line Endings
+
+- **`scripts/style-check.py`** mechanically enforces
+  [`STYLE_GUIDE.md`](STYLE_GUIDE.md) against the fork-carried `radeon_hd`
+  tree (the fork is driver-only, so upstream-only files are out of its
+  scope). Adoption is baseline-based: `scripts/style-baseline.txt` records
+  the known-violating set so new code is held to the guide without a
+  tree-wide reformat, and the checker fails if the baseline goes stale.
+- **`scripts/package.sh` gates on it** — a release cannot be packaged
+  while the linter fails, which automates the style audit the TODO list
+  used to defer to. Invoked as `python3 style-check.py` rather than
+  relying on the executable bit.
+- **Line endings normalized to LF** across sources, headers, diagrams and
+  scripts, pinned by a new `.gitattributes` so they cannot drift back.
 
 ---
 

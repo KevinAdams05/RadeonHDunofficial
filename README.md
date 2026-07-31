@@ -1,6 +1,3 @@
->[!NOTE]
->An LLM was used to aid in development of this code.
-
 **Bug reports (please attach listdev output, syslog and/or screenshots) and PRs welcome! See "Logging Bugs / How to Help" section below**
 
 # RadeonHD (Unofficial) - Haiku Driver
@@ -74,9 +71,27 @@ Tested on Haiku hrev59697.
 - [`docs/technical-documentation.md`](docs/technical-documentation.md) — full
   technical write-up of every fix, including root cause, approach, register
   details, and architectural context.
+- **Investigation write-ups** — prep, evidence and hardware results for work
+  that is not yet in a release, whether still open or landed and awaiting
+  one:
+  - [`docs/scanout-watermark-investigation.md`](docs/scanout-watermark-investigation.md)
+    — display bandwidth arbitration. Implemented and verified on Turks and
+    Cedar; also the record of how the pixel-clock caps were traced to a
+    power-management cause.
+  - [`docs/power-management-investigation.md`](docs/power-management-investigation.md)
+    — raising the cards off their VBIOS-posted power state. **Complete.**
+    An opt-in engine-clock raise is implemented (`raise_clocks`, default
+    off) and verified on Barts at +31% scanout bandwidth, but memory
+    reclocking silently no-ops on Northern Islands through the legacy
+    AtomBIOS path — so **the pixel-clock caps stay** until someone does the
+    DPM/SMC work.
+  - [`docs/multi-monitor-analysis.md`](docs/multi-monitor-analysis.md)
+    — feasibility analysis for driving more than one display, and the state
+    of Haiku's own multi-screen support.
 - [`diagrams/`](diagrams/) — SVG diagrams referenced from the technical docs
   (architecture, MC halt/resume flow, pixel clock validation, VRAM detection,
-  spread spectrum bug, PLL routing, DPMS sequence, DP link training).
+  spread spectrum bug, PLL routing, DPMS sequence, DP link training,
+  watermark arbitration, PowerPlay level targets, multi-monitor tracks).
 
 ---
 
@@ -153,16 +168,20 @@ for the changelog-format release notes see
 
 ### ABI lockstep — kernel driver and accelerant must match
 
-The kernel driver (`radeon_hd`) and the accelerant
-(`radeon_hd.accelerant`) share an in-memory `accelerant_info` struct via
-`clone_area`. This fork extends that struct (with `evergreen_gpu_state`
-for the Evergreen MC halt/resume path), so its layout differs from the
-stock Haiku build.
+The kernel driver (`radeon_hd`) creates a `radeon_shared_info` struct
+(`headers/private/graphics/radeon_hd/radeon_hd.h`) in a kernel area, and the
+accelerant (`radeon_hd.accelerant`) maps it with `clone_area`. Both sides
+dereference it directly, with no version negotiation — so if the two
+binaries are built from trees whose layout for that struct differs, they
+disagree on field offsets and the result is a crash on first display setup
+or silent state corruption.
 
-Always install both binaries together, both from this fork's `.hpkg`.
-Never mix the fork's accelerant with the stock kernel driver (or vice
-versa) — the two sides would disagree on the struct layout and the
-system will crash on first display setup. 
+Always install both binaries together, both from this fork's `.hpkg`. Mixing
+the fork's accelerant with a stock kernel driver is unsupported: even when
+the struct happens to match, a half override silently skips any card whose
+entry upstream compiles out (e.g. the HD 6850, gated behind `#if 0` in
+stock Haiku), leaving you on the unaccelerated `framebuffer` driver with no
+error.
 
 **The `.hpkg` ships both
 binaries atomically**, so this is automatic as long as you install via

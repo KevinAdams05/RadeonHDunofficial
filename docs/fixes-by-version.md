@@ -1,6 +1,3 @@
->[!NOTE]
->An LLM was used to aid in development of this code.
-
 # RadeonHD (Unofficial) — Fixes by Version
 
 Short summary of each shipped version. For the full technical write-up

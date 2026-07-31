@@ -1,6 +1,3 @@
->[!NOTE]
->An LLM was used to aid in development of this code.
-
 # DCE vs DCN — and what marks the boundaries between Haiku's AMD graphics drivers
 
 This document explains the architectural distinctions between AMD's
