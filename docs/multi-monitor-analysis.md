@@ -830,10 +830,10 @@ means. All of this is **outside** this fork's driver-only scope
 | # | Step | Scope | Blocked on |
 |---|---|---|---|
 | 1 | ✅ Watermark/arbitration Phase B | fork | done 2026-07-30 |
-| 2 | A1 — clone/mirror on two heads | fork | 1 |
-| 3 | PLL allocator for DCE ≤ 3 (or gate to DCE ≥ 4) | fork | 2 |
+| 2 | 🔨 A1 — clone/mirror on two heads | fork | 1 — **implemented 2026-07-31, awaiting hardware test** |
+| 3 | PLL allocator for DCE ≤ 3 (gated to DCE ≥ 4 for now) | fork | 2 |
 | 4 | A2 — horizontal span (≤ 1200p heads) + `B_PROPOSE_DISPLAY_MODE` tunnel | fork | 2, 3 |
-| 5 | Clock/power management — raise off PowerPlay level 1 | fork | §7.1 |
+| 5 | ✅ Clock/power management — raise off PowerPlay level 1 | fork | investigated 2026-07-31; engine raise opt-in, memory reclock needs DPM/SMC |
 | 6 | A3 — vertical span, larger heads, unequal-size opt-in | fork | 4, 5 |
 | 7 | Write up the mode taxonomy + register findings in `docs/` | fork | 4 |
 | 8 | Resolve API-v2 versioning and revive Gerrit 329 | upstream | discussion |
@@ -842,6 +842,19 @@ means. All of this is **outside** this fork's driver-only scope
 
 Note step 5's new position: it is not needed for clone or dual-1080p span,
 but it gates anything larger (§7.1).
+
+**Update 2026-07-31 — step 5 is answered, and not in this plan's favour.**
+The engine-clock raise works and is shipped opt-in, but memory reclocking
+silently no-ops on Northern Islands through the legacy AtomBIOS path, and
+lifting a board off its parked memory clock needs DPM/SMC work
+(`power-management-investigation.md` §10–§11). Clone and dual-1080p/1200p
+span are unaffected — they fit inside the current bandwidth. **Span above
+1200p per head is now blocked on a DPM-sized project, not on a clock
+write.** That is an argument for shipping A1 and A2 at the sizes that fit
+and saying so plainly, rather than holding them for A3.
+
+Implementation progress for steps 2–4 is logged in
+[`multi-monitor-track-a.md`](multi-monitor-track-a.md).
 
 Steps 1–7 are self-contained, testable on the hardware in
 `TestHardware/`, and produce a shippable `.hpkg` that lights up a second

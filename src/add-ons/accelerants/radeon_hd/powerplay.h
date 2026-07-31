@@ -65,6 +65,26 @@ powerplay_voltage_is_virtual(uint16 voltage)
 }
 
 
+/*! Read one boolean out of the driver settings, defaulting to off.
+
+	The fork's generic gate reader, not specific to power management — it
+	lives here because this file is where the settings mechanism is
+	documented, and `mode.cpp` already reaches in for
+	`powerplay_pixel_clock_cap_ignored()`.
+
+	Every gate in this fork is opt-in and defaults off, because recovering
+	from a board that does not like what a gate turned on should be editing
+	one line in ~/config/settings/kernel/drivers/radeon_hd — not
+	reinstalling anything.
+
+	load_driver_settings() is the standard Haiku mechanism and is available
+	to userland through libroot, which matters because this runs in the
+	accelerant rather than the kernel driver. Note the userland
+	implementation resolves only B_USER_SETTINGS_DIRECTORY, so this is the
+	per-user file and not a system-wide one. */
+bool radeon_setting_enabled(const char* key);
+
+
 /*! Current engine / memory clock in kHz via the AtomBIOS GetEngineClock /
 	GetMemoryClock command tables, or 0 if unavailable.
 

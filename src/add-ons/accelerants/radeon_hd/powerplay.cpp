@@ -68,17 +68,10 @@ powerplay_memory_clock_current()
 
 /*!	Read one boolean out of the driver settings, defaulting to off.
 
-	Everything here is opt-in, because recovering from a board that does not
-	like its new clocks should be editing one line in
-	~/config/settings/kernel/drivers/radeon_hd — not reinstalling anything.
-
-	load_driver_settings() is the standard Haiku mechanism and is available
-	to userland through libroot, which matters because this runs in the
-	accelerant rather than the kernel driver. Note the userland
-	implementation resolves only B_USER_SETTINGS_DIRECTORY, so this is the
-	per-user file and not a system-wide one. */
-static bool
-powerplay_setting_enabled(const char* key)
+	See the declaration in powerplay.h for why every gate in this fork is
+	opt-in and how the settings file is resolved. */
+bool
+radeon_setting_enabled(const char* key)
 {
 	bool enabled = false;
 
@@ -95,7 +88,7 @@ powerplay_setting_enabled(const char* key)
 static bool
 powerplay_raise_enabled()
 {
-	return powerplay_setting_enabled("raise_clocks");
+	return radeon_setting_enabled("raise_clocks");
 }
 
 
@@ -110,7 +103,7 @@ static bool
 powerplay_memory_raise_enabled()
 {
 	return powerplay_raise_enabled()
-		&& powerplay_setting_enabled("raise_memory_clock");
+		&& radeon_setting_enabled("raise_memory_clock");
 }
 
 
@@ -815,5 +808,5 @@ powerplay_apply_target()
 bool
 powerplay_pixel_clock_cap_ignored()
 {
-	return powerplay_setting_enabled("ignore_pixel_clock_cap");
+	return radeon_setting_enabled("ignore_pixel_clock_cap");
 }

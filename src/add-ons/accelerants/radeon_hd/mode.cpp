@@ -46,6 +46,10 @@ extern "C" void _sPrintf(const char* format, ...);
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
 
 
+// Defined further down, alongside the public is_mode_supported() it backs.
+static bool is_mode_supported_on_display(display_mode* mode, uint32 crtid);
+
+
 status_t
 create_mode_list(void)
 {
@@ -167,49 +171,153 @@ radeon_dpms_set(uint8 id, int mode)
 }
 
 
-void
-radeon_dpms_set_hook(int mode)
+/*!	Has this head actually been programmed with a mode?
+
+	The same test bandwidth_crtc_is_active() uses, and for the same reason:
+	gDisplay[]->powered is set for every attached display before any mode has
+	been set, so it cannot distinguish "driving a monitor" from "a monitor is
+	plugged in". A head that is attached but not driven — clone turned off, or
+	a second monitor that could not take the mode — must read as dark. */
+static bool
+display_is_lit(uint32 crtcID)
 {
-	// TODO: multi-monitor?
+	if (crtcID >= MAX_DISPLAY)
+		return false;
 
-	uint8 crtcID = 0;
-
-	if (gDisplay[crtcID]->attached)
-		radeon_dpms_set(crtcID, mode);
+	return gDisplay[crtcID]->attached
+		&& gDisplay[crtcID]->currentMode.timing.pixel_clock != 0;
 }
 
 
-status_t
-radeon_set_display_mode(display_mode* mode)
+void
+radeon_dpms_set_hook(int mode)
 {
-	// TODO: multi-monitor? For now we set the mode on
-	// the first display found.
+	// Every head this configuration lit, not every attached head: powering an
+	// attached-but-undriven head here would scan out whatever stale timing
+	// its CRTC happens to hold.
+	bool anyHead = false;
+	for (uint32 crtcID = 0; crtcID < MAX_DISPLAY; crtcID++) {
+		if (!display_is_lit(crtcID))
+			continue;
 
-	TRACE("%s\n", __func__);
-	TRACE("  mode->space: %#" B_PRIx32 "\n", mode->space);
-	TRACE("  mode->virtual_width: %" B_PRIu16 "\n", mode->virtual_width);
-	TRACE("  mode->virtual_height: %" B_PRIu16 "\n", mode->virtual_height);
-	TRACE("  mode->h_display_start: %" B_PRIu16 "\n", mode->h_display_start);
-	TRACE("  mode->v_display_start: %" B_PRIu16 "\n", mode->v_display_start);
-	TRACE("  mode->flags: %#" B_PRIx32 "\n", mode->flags);
+		radeon_dpms_set(crtcID, mode);
+		anyHead = true;
+	}
 
-	uint8 crtcID = 0;
+	if (!anyHead) {
+		// Before the first mode set there is no lit head, and app_server does
+		// call this on the way in; fall back to the historical behavior so a
+		// pre-mode-set DPMS request is not silently dropped.
+		if (gDisplay[0]->attached)
+			radeon_dpms_set(0, mode);
+	}
+}
 
-	if (gDisplay[crtcID]->attached == false)
-		return B_ERROR;
 
-	// Re-validate the requested mode. is_mode_supported() filters the
-	// offered mode list, but app_server can also restore a previously-
-	// saved mode that's no longer in the list (e.g. after a driver
-	// update tightens the caps). Reject those here so persisted user
-	// preferences can't bypass the per-chip pixel-clock caps.
-	if (!is_mode_supported(mode))
-		return B_BAD_VALUE;
+/*!	Release every PLL assignment ahead of a mode set.
 
-	// Copy this display mode into the "current mode" for the display
-	memcpy(&gDisplay[crtcID]->currentMode, mode, sizeof(display_mode));
+	pll_pick() allocates out of pll_usage_mask(), which is built from the PLL
+	ids still recorded on gConnector[] — and nothing ever clears them, so the
+	mask only ever grows. With one head that was harmless: the allocator just
+	alternated between PPLL1 and PPLL2 across successive mode sets. With two
+	heads it is fatal. The first mode set takes PPLL1 and PPLL2; the second
+	finds both "in use", gets ATOM_PPLL_INVALID back for head 0, and programs
+	a head with no PLL.
 
+	A mode set reprograms every head it is going to drive, so no PLL is
+	genuinely in use at this point. Clearing first also means the DCE 6.1+
+	DisplayPort sharing path in pll_pick() only ever sees assignments made
+	during this pass. */
+static void
+release_pll_assignments()
+{
+	for (uint32 id = 0; id < ATOM_MAX_SUPPORTED_DEVICE; id++) {
+		if (gConnector[id]->valid)
+			gConnector[id]->encoder.pll.id = ATOM_PPLL_INVALID;
+	}
+}
+
+
+/*!	Choose which heads this mode set drives — Track A milestone A1, clone.
+
+	Head 0 is always driven; that is what this driver has always done. A
+	second head joins it in clone (mirror) only when all of the following
+	hold:
+
+	- **`clone_displays` is set** in the driver settings. Off by default:
+	  until the hardware matrix is covered, a second head that mode-sets
+	  badly would cost the user the working display they already had.
+	- **The card is DCE 4 or later.** pll_pick()'s pre-DCE-4 path ends in an
+	  unconditional `pll->id = ATOM_PPLL1` with no allocator behind it, so two
+	  heads would both claim PPLL1. Teaching that path to allocate is separate
+	  work — see docs/multi-monitor-analysis.md §6.4.
+	- **The monitor on it accepts this exact mode.** Clone drives every head
+	  from one display_mode, so a mode outside the second monitor's EDID
+	  ranges, or over its connector's pixel-clock ceiling, cannot be sent to
+	  it.
+
+	A head that fails any of these is left dark rather than failing the mode
+	set — the degradation rule the BeOS-era radeon driver applied in
+	Radeon_VerifyMultiMode(): never fail a mode set because a secondary head
+	could not join it.
+
+	Returns the number of heads selected, always at least one. */
+static uint32
+select_clone_heads(display_mode* mode, bool* heads)
+{
+	radeon_shared_info &info = *gInfo->shared_info;
+
+	for (uint32 id = 0; id < MAX_DISPLAY; id++)
+		heads[id] = false;
+
+	heads[0] = true;
+	uint32 headCount = 1;
+
+	if (!radeon_setting_enabled("clone_displays"))
+		return headCount;
+
+	if (info.dceMajor < 4) {
+		TRACE("%s: clone_displays set, but DCE %" B_PRIu8 " has no PLL "
+			"allocator - driving head 0 only\n", __func__, info.dceMajor);
+		return headCount;
+	}
+
+	for (uint32 id = 1; id < MAX_DISPLAY; id++) {
+		if (!gDisplay[id]->attached)
+			continue;
+
+		if (!is_mode_supported_on_display(mode, id)) {
+			TRACE("%s: display %" B_PRIu32 " cannot take %" B_PRIu16 "x%"
+				B_PRIu16 " at %" B_PRIu32 " kHz - leaving it dark\n", __func__,
+				id, mode->virtual_width, mode->virtual_height,
+				mode->timing.pixel_clock);
+			continue;
+		}
+
+		heads[id] = true;
+		headCount++;
+	}
+
+	TRACE("%s: cloning across %" B_PRIu32 " head(s)\n", __func__, headCount);
+
+	return headCount;
+}
+
+
+/*!	Run the mode-set sequence on one head.
+
+	Lifted unchanged out of radeon_set_display_mode() so clone mode can run it
+	per head. The caller owns everything global: the encoder output lock, the
+	PLL release, clearing the recorded mode of heads that drop out, the HDMI
+	infoframe pass and the bandwidth update. (This head's own currentMode is
+	published from inside, by display_crtc_fb_set().) */
+static void
+set_mode_on_head(uint8 crtcID, display_mode* mode)
+{
 	uint32 connectorIndex = gDisplay[crtcID]->connectorIndex;
+
+	TRACE("%s: display %" B_PRIu8 ", connector %" B_PRIu32 "\n", __func__,
+		crtcID, connectorIndex);
 
 	// Determine DP lanes if DP
 	if (connector_is_dp(connectorIndex)) {
@@ -219,7 +327,6 @@ radeon_set_display_mode(display_mode* mode)
 	}
 
 	// *** crtc and encoder prep
-	encoder_output_lock(true);
 	display_crtc_lock(crtcID, ATOM_ENABLE);
 	radeon_dpms_set(crtcID, B_DPMS_OFF);
 
@@ -248,20 +355,83 @@ radeon_set_display_mode(display_mode* mode)
 	// *** encoder and CRT controller commit
 	radeon_dpms_set(crtcID, B_DPMS_ON);
 	display_crtc_lock(crtcID, ATOM_DISABLE);
+}
+
+
+status_t
+radeon_set_display_mode(display_mode* mode)
+{
+	TRACE("%s\n", __func__);
+	TRACE("  mode->space: %#" B_PRIx32 "\n", mode->space);
+	TRACE("  mode->virtual_width: %" B_PRIu16 "\n", mode->virtual_width);
+	TRACE("  mode->virtual_height: %" B_PRIu16 "\n", mode->virtual_height);
+	TRACE("  mode->h_display_start: %" B_PRIu16 "\n", mode->h_display_start);
+	TRACE("  mode->v_display_start: %" B_PRIu16 "\n", mode->v_display_start);
+	TRACE("  mode->flags: %#" B_PRIx32 "\n", mode->flags);
+
+	if (gDisplay[0]->attached == false)
+		return B_ERROR;
+
+	// Re-validate the requested mode. is_mode_supported() filters the
+	// offered mode list, but app_server can also restore a previously-
+	// saved mode that's no longer in the list (e.g. after a driver
+	// update tightens the caps). Reject those here so persisted user
+	// preferences can't bypass the per-chip pixel-clock caps.
+	if (!is_mode_supported(mode))
+		return B_BAD_VALUE;
+
+	bool heads[MAX_DISPLAY];
+	uint32 headCount = select_clone_heads(mode, heads);
+
+	// Clear the recorded mode of every head this configuration will not drive.
+	// display_crtc_fb_set() publishes currentMode for the heads that are
+	// programmed, but nothing clears it for one that drops out — and
+	// bandwidth_update() counts exactly that field to decide the line-buffer
+	// split, so a stale entry would let a head that is now dark keep claiming
+	// half the line buffer.
+	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
+		if (!heads[id])
+			memset(&gDisplay[id]->currentMode, 0, sizeof(display_mode));
+	}
+
+	release_pll_assignments();
+
+	encoder_output_lock(true);
+
+	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
+		if (heads[id])
+			set_mode_on_head(id, mode);
+	}
+
+	// Blank any attached head this configuration does not drive, so turning
+	// clone back off — or landing on a mode the second monitor cannot take —
+	// leaves that monitor dark instead of scanning out a stale timing.
+	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
+		if (!heads[id] && gDisplay[id]->attached
+			&& gDisplay[id]->powered) {
+			TRACE("%s: blanking undriven head %" B_PRIu32 "\n", __func__, id);
+			radeon_dpms_set(id, B_DPMS_OFF);
+		}
+	}
+
 	encoder_output_lock(false);
 
-	// Phase A instrumentation (magenta-stripe investigation): program the
-	// AVI infoframe with read-back logging while the encoder itself stays
-	// in DVI mode (display_get_encoder_mode still returns
-	// ATOM_ENCODER_MODE_DVI for HDMIA — the Phase 1.5 workaround), so the
-	// desktop stays clean. The read-back here, compared against the one
-	// at the end of this function, answers investigation suspect #1: do
-	// our HDMI-block writes stick, or does a later AtomBIOS call clobber
-	// them? Flipping the encoder back to ATOM_ENCODER_MODE_HDMI is the
-	// follow-up once the writes are confirmed to stick.
-	if (gConnector[connectorIndex]->type == VIDEO_CONNECTOR_HDMIA) {
-		hdmi_avi_infoframe_program(crtcID);
-		hdmi_registers_dump(crtcID, "right after infoframe program");
+	// Always-on bug-report instrumentation, per lit HDMI head: program the
+	// AVI infoframe and dump the HDMI/AFMT block, then dump it again at the
+	// end of the mode set. Two samples rather than one because the 0.6.3
+	// investigation turned on whether a later AtomBIOS call clobbers our
+	// writes; the pair makes that visible in any user's syslog. Runs after
+	// the output lock is released, matching the order the single-head path
+	// has always used.
+	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
+		if (!heads[id])
+			continue;
+
+		uint32 connectorIndex = gDisplay[id]->connectorIndex;
+		if (gConnector[connectorIndex]->type == VIDEO_CONNECTOR_HDMIA) {
+			hdmi_avi_infoframe_program(id);
+			hdmi_registers_dump(id, "right after infoframe program");
+		}
 	}
 
 	#ifdef TRACE_MODE
@@ -290,22 +460,33 @@ radeon_set_display_mode(display_mode* mode)
 		Read32(CRT, AVIVO_D1CRTC_BLANK_CONTROL));
 	#endif
 
-	// Phase A instrumentation, second sample: if these values differ
-	// from the "right after infoframe program" dump above, something in
-	// the remaining mode-set path (AtomBIOS DPMS / lock release)
-	// reprogrammed the HDMI block behind our back.
-	if (gConnector[connectorIndex]->type == VIDEO_CONNECTOR_HDMIA) {
-		hdmi_registers_dump(crtcID, "end of mode set");
-		hdmi_block_dump(crtcID);
+	// Second sample: values differing from the "right after infoframe
+	// program" dump above mean something later in the mode-set path
+	// (AtomBIOS DPMS / lock release) reprogrammed the HDMI block behind our
+	// back — the failure mode the 0.6.3 stripe fix was chasing.
+	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
+		if (!heads[id])
+			continue;
+
+		uint32 connectorIndex = gDisplay[id]->connectorIndex;
+		if (gConnector[connectorIndex]->type == VIDEO_CONNECTOR_HDMIA) {
+			hdmi_registers_dump(id, "end of mode set");
+			hdmi_block_dump(id);
+		}
 	}
 
 	// Scanout bandwidth arbitration. Must run after the CRTC and encoder
 	// are programmed, because it derives the watermarks from the mode that
-	// was actually applied. The before/after dumps bracket it so a syslog
-	// alone shows both what the VBIOS left and what we wrote.
+	// was actually applied — and after every head is programmed, because the
+	// line-buffer split depends on how many heads ended up active. The
+	// before/after dumps bracket it so a syslog alone shows both what the
+	// VBIOS left and what we wrote.
 	bandwidth_registers_dump("before bandwidth update");
 	bandwidth_update();
 	bandwidth_registers_dump("after bandwidth update");
+
+	TRACE("%s: mode set complete on %" B_PRIu32 " head(s)\n", __func__,
+		headCount);
 
 	return B_OK;
 }
@@ -370,8 +551,16 @@ radeon_get_pixel_clock_limits(display_mode* mode, uint32* _low, uint32* _high)
 }
 
 
-bool
-is_mode_supported(display_mode* mode)
+/*!	Would this mode work on one specific head?
+
+	The connector-type pixel-clock ceiling and the EDID frequency ranges are
+	both properties of the display that is plugged in, not of the card, so
+	the answer differs per head as soon as more than one is driven. Clone
+	mode asks this of every candidate head before offering it the mode; the
+	public is_mode_supported() below asks it of head 0 only, because that is
+	the head whose EDID built the mode list. */
+static bool
+is_mode_supported_on_display(display_mode* mode, uint32 crtid)
 {
 	bool sane = true;
 
@@ -395,9 +584,6 @@ is_mode_supported(display_mode* mode)
 			mode->virtual_height);
 		sane = false;
 	}
-
-	// TODO: is_mode_supported on *which* display?
-	uint32 crtid = 0;
 
 	// Validate pixel clock against connector type limits.
 	// HDMI single-link TMDS maxes out at 165 MHz (pre-DCE6) or
@@ -542,7 +728,8 @@ is_mode_supported(display_mode* mode)
 		}
 	}
 
-	TRACE("MODE: %d ; %d %d %d %d ; %d %d %d %d is %s\n",
+	TRACE("MODE (display %" B_PRIu32 "): %" B_PRIu32
+		" ; %d %d %d %d ; %d %d %d %d is %s\n", crtid,
 		mode->timing.pixel_clock, mode->timing.h_display,
 		mode->timing.h_sync_start, mode->timing.h_sync_end,
 		mode->timing.h_total, mode->timing.v_display,
@@ -551,6 +738,15 @@ is_mode_supported(display_mode* mode)
 		sane ? "OK." : "BAD, out of range!");
 
 	return sane;
+}
+
+
+bool
+is_mode_supported(display_mode* mode)
+{
+	// Head 0 is the reference: its EDID is what create_mode_list() built the
+	// offered list from, and this is the filter create_display_modes() calls.
+	return is_mode_supported_on_display(mode, 0);
 }
 
 

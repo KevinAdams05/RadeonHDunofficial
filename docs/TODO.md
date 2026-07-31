@@ -180,18 +180,22 @@ to split NAVI into NAVI10, NAVI12, etc"). Many entries share
 current functional impact — Navi is DCN, out of scope for this AtomBIOS/DCE
 driver, and its table block stays behind `#if 0`.
 
-### 12. Multi-monitor: scattered single-CRTC TODOs
-`src/.../accelerants/radeon_hd/mode.cpp` (lines 52, 78, 88, 99, 119, 150,
-173, 185, 399, 661-664) and `display.cpp:1075` ("TODO: shared PLL
-detected!"). The accelerant hardwires `crtcID = 0` / display 0 throughout.
+### 12. Multi-monitor: remaining single-CRTC TODOs
+**In progress on `radeonhd/multi-monitor/v0.7.0`** — Track A milestone A1
+(clone/mirror) is implemented and awaiting a hardware test; see
+[`multi-monitor-track-a.md`](multi-monitor-track-a.md) for what landed and
+[`multi-monitor-analysis.md`](multi-monitor-analysis.md) for the design.
+Track B needs Haiku-side work and stays blocked on unmerged Gerrit 329.
 
-This is a feature, not a bug, and it now has a design behind it:
-[`multi-monitor-analysis.md`](multi-monitor-analysis.md). **Track A
-(span/clone via the BeOS-era `B_SCROLL` mechanism, which is still live in
-Haiku) is driver-only and therefore shippable from this fork**; Track B
-needs Haiku-side work and is blocked on unmerged Gerrit change 329. The
-scattered TODOs are tracked here so they are visible in one place when
-Track A is picked up.
+Still display-0-only after A1, all of it mode-list and query surface rather
+than hardware bring-up: `src/.../accelerants/radeon_hd/mode.cpp:56`
+(`create_mode_list()` builds from head 0's EDID — correct for Track A,
+wrong for Track B), `:82`, `:92`, `:103` (mode count / mode list /
+preferred mode), `:123` (`radeon_get_edid_info()`), `:856-859`
+(`radeon_set_brightness()` — backlight assumes head 0 is the panel), and
+`display.cpp:1075` ("TODO: shared PLL detected!"). The identical-clock PLL sharing TODO in
+`pll_next_available()` becomes reachable with two heads and clone is its
+worst case, since both heads want the same clock.
 
 ### 13. Stale per-encoder TODO stubs (mostly diagnostic)
 `src/.../accelerants/radeon_hd/encoder.cpp:465`, `:1114`, `:2124`
