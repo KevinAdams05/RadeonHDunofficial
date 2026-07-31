@@ -270,6 +270,46 @@
 #define EVERGREEN_DC_GPIO_HPD_Y						0x64bc
 
 
+/* DisplayPort AUX engine, one block per AUX channel
+ *
+ * Six independent AUX engines, selected by the AUX instance number. The
+ * instance is the connector's i2c GPIO hardware pin minus 0x90 — AtomBIOS
+ * hands out DP AUX channel ids in the 0x90..0x95 range and they map onto
+ * these blocks in order. The block spacing is irregular (0x50, 0x50, 0x60,
+ * 0x50, 0x50), so it has to be a table rather than a multiply.
+ *
+ * Only needed for diagnostics here: mode setting and AUX transactions
+ * themselves go through the AtomBIOS ProcessAuxChannelTransaction command,
+ * which owns these registers. Reading AUX_SW_STATUS after a failed
+ * transaction is the only way to find out *why* AtomBIOS reported a
+ * failure, since it collapses every error into a single status byte.
+ */
+#define EVERGREEN_DP_AUX_INSTANCE_COUNT				6
+#define EVERGREEN_DP_AUX_FIRST_CHANNEL_ID			0x90
+
+#define EVERGREEN_AUX_CONTROL						0x0000
+#define		EVERGREEN_AUX_EN						(1 << 0)
+#define		EVERGREEN_AUX_LS_READ_EN				(1 << 8)
+#define EVERGREEN_AUX_SW_CONTROL					0x0004
+#define		EVERGREEN_AUX_SW_GO						(1 << 0)
+#define EVERGREEN_AUX_SW_STATUS						0x0018
+#define		EVERGREEN_AUX_SW_DONE					(1 << 0)
+#define		EVERGREEN_AUX_SW_REQ					(1 << 1)
+#define		EVERGREEN_AUX_SW_RX_TIMEOUT				(1 << 7)
+#define		EVERGREEN_AUX_SW_RX_OVERFLOW			(1 << 8)
+#define		EVERGREEN_AUX_SW_RX_HPD_DISCON			(1 << 9)
+#define		EVERGREEN_AUX_SW_RX_PARTIAL_BYTE		(1 << 10)
+#define		EVERGREEN_AUX_SW_NON_AUX_MODE			(1 << 11)
+#define		EVERGREEN_AUX_SW_RX_MIN_COUNT_VIOL		(1 << 12)
+#define		EVERGREEN_AUX_SW_RX_INVALID_STOP		(1 << 14)
+#define		EVERGREEN_AUX_SW_RX_SYNC_INVALID_L		(1 << 17)
+#define		EVERGREEN_AUX_SW_RX_SYNC_INVALID_H		(1 << 18)
+#define		EVERGREEN_AUX_SW_RX_INVALID_START		(1 << 19)
+#define		EVERGREEN_AUX_SW_RX_RECV_NO_DET			(1 << 20)
+#define		EVERGREEN_AUX_SW_RX_RECV_INVALID_H		(1 << 22)
+#define		EVERGREEN_AUX_SW_RX_RECV_INVALID_V		(1 << 23)
+
+
 /* Display Bandwidth / Watermark / Priority registers
  *
  * The display engine arbitrates with other memory clients via two

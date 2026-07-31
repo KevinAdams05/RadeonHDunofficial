@@ -14,6 +14,7 @@
 
 #include <Debug.h>
 
+#include "accelerant.h"
 #include "accelerant_protos.h"
 #include "atombios-obsolete.h"
 #include "connector.h"
@@ -32,6 +33,103 @@
 #endif
 
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
+
+
+/*!	Log the DP AUX engine's own state after AtomBIOS reports a failed
+	transaction.
+
+	AtomBIOS collapses every AUX failure into a single status byte
+	(1 = timeout, 2 = flags not zero, 3 = error), which is not enough to tell
+	a sink that never answered from an engine that was never brought up. The
+	individual causes — and in particular whether the engine saw hot-plug
+	detect drop out from under it — are only readable in AUX_SW_STATUS.
+
+	Diagnostics only; the AUX registers belong to AtomBIOS and are not
+	written here. Bounded to the first few failures so a connector with no
+	sink cannot flood the syslog.
+*/
+static void
+dp_aux_dump_state(uint32 connectorIndex, uint8 replyStatus)
+{
+	radeon_shared_info &info = *gInfo->shared_info;
+
+	static int sDumpsRemaining = 4;
+	if (sDumpsRemaining <= 0)
+		return;
+	sDumpsRemaining--;
+
+	uint32 auxPin = gConnector[connectorIndex]->dpInfo.auxPin;
+	uint32 instance = auxPin - EVERGREEN_DP_AUX_FIRST_CHANNEL_ID;
+
+	ERROR("%s: connector %" B_PRIu32 ": atom reply status %" B_PRIu8 ", aux "
+		"channel 0x%" B_PRIx32 " (instance %" B_PRIu32 "), atom hpd id %"
+		B_PRIu16 "\n", __func__, connectorIndex, replyStatus, auxPin, instance,
+		connector_pick_atom_hpdid(connectorIndex));
+
+	// The HPD sense lines tell us whether the card can see the sink at all,
+	// which separates "no monitor / dead link" from "engine not ready".
+	ERROR("%s: DC_GPIO_HPD_Y 0x%08" B_PRIx32 ", _EN 0x%08" B_PRIx32 ", _A "
+		"0x%08" B_PRIx32 "\n", __func__,
+		Read32(OUT, EVERGREEN_DC_GPIO_HPD_Y),
+		Read32(OUT, EVERGREEN_DC_GPIO_HPD_EN),
+		Read32(OUT, EVERGREEN_DC_GPIO_HPD_A));
+
+	// The AUX block layout below was confirmed against Northern Islands
+	// through Sea Islands. Don't guess at it on parts outside that range.
+	if (info.dceMajor < 5 || info.dceMajor > 8) {
+		ERROR("%s: DCE %" B_PRIu8 ".%" B_PRIu8 " - AUX engine register layout "
+			"unverified, not dumping\n", __func__, info.dceMajor,
+			info.dceMinor);
+		return;
+	}
+
+	if (instance >= EVERGREEN_DP_AUX_INSTANCE_COUNT) {
+		ERROR("%s: aux channel 0x%" B_PRIx32 " maps to instance %" B_PRIu32
+			", outside the %d known AUX engines - not dumping\n", __func__,
+			auxPin, instance, EVERGREEN_DP_AUX_INSTANCE_COUNT);
+		return;
+	}
+
+	// Irregular spacing between the engines, so this has to be a table.
+	static const uint32 kAuxEngineBase[EVERGREEN_DP_AUX_INSTANCE_COUNT] = {
+		0x6200, 0x6250, 0x62a0, 0x6300, 0x6350, 0x63a0
+	};
+	uint32 base = kAuxEngineBase[instance];
+
+	uint32 control = Read32(OUT, base + EVERGREEN_AUX_CONTROL);
+	uint32 status = Read32(OUT, base + EVERGREEN_AUX_SW_STATUS);
+
+	ERROR("%s: AUX_CONTROL 0x%08" B_PRIx32 " (engine %s), AUX_SW_STATUS "
+		"0x%08" B_PRIx32 "\n", __func__, control,
+		(control & EVERGREEN_AUX_EN) != 0 ? "enabled" : "DISABLED", status);
+
+	// Decode the status bits that explain a "flags not zero" reply.
+	struct {
+		uint32		bit;
+		const char*	name;
+	} static const kStatusBits[] = {
+		{ EVERGREEN_AUX_SW_DONE,				"DONE" },
+		{ EVERGREEN_AUX_SW_REQ,					"REQ" },
+		{ EVERGREEN_AUX_SW_RX_TIMEOUT,			"RX_TIMEOUT" },
+		{ EVERGREEN_AUX_SW_RX_OVERFLOW,			"RX_OVERFLOW" },
+		{ EVERGREEN_AUX_SW_RX_HPD_DISCON,		"RX_HPD_DISCON" },
+		{ EVERGREEN_AUX_SW_RX_PARTIAL_BYTE,		"RX_PARTIAL_BYTE" },
+		{ EVERGREEN_AUX_SW_NON_AUX_MODE,		"NON_AUX_MODE" },
+		{ EVERGREEN_AUX_SW_RX_MIN_COUNT_VIOL,	"RX_MIN_COUNT_VIOL" },
+		{ EVERGREEN_AUX_SW_RX_INVALID_STOP,		"RX_INVALID_STOP" },
+		{ EVERGREEN_AUX_SW_RX_SYNC_INVALID_L,	"RX_SYNC_INVALID_L" },
+		{ EVERGREEN_AUX_SW_RX_SYNC_INVALID_H,	"RX_SYNC_INVALID_H" },
+		{ EVERGREEN_AUX_SW_RX_INVALID_START,	"RX_INVALID_START" },
+		{ EVERGREEN_AUX_SW_RX_RECV_NO_DET,		"RX_RECV_NO_DET" },
+		{ EVERGREEN_AUX_SW_RX_RECV_INVALID_H,	"RX_RECV_INVALID_H" },
+		{ EVERGREEN_AUX_SW_RX_RECV_INVALID_V,	"RX_RECV_INVALID_V" }
+	};
+
+	for (uint32 i = 0; i < B_COUNT_OF(kStatusBits); i++) {
+		if ((status & kStatusBits[i].bit) != 0)
+			ERROR("%s:   + %s\n", __func__, kStatusBits[i].name);
+	}
+}
 
 
 static ssize_t
@@ -79,12 +177,15 @@ dp_aux_speak(uint32 connectorIndex, uint8* send, int sendBytes,
 	switch (args.v2.ucReplyStatus) {
 		case 1:
 			ERROR("%s: dp_aux channel timeout!\n", __func__);
+			dp_aux_dump_state(connectorIndex, args.v2.ucReplyStatus);
 			return B_TIMED_OUT;
 		case 2:
 			ERROR("%s: dp_aux channel flags not zero!\n", __func__);
+			dp_aux_dump_state(connectorIndex, args.v2.ucReplyStatus);
 			return B_BUSY;
 		case 3:
 			ERROR("%s: dp_aux channel error!\n", __func__);
+			dp_aux_dump_state(connectorIndex, args.v2.ucReplyStatus);
 			return B_IO_ERROR;
 	}
 

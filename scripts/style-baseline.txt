@@ -20,7 +20,7 @@ src/add-ons/accelerants/radeon_hd/display.cpp	line-too-long	412
 src/add-ons/accelerants/radeon_hd/display.cpp	line-too-long	659
 src/add-ons/accelerants/radeon_hd/display.cpp	line-too-long	686
 src/add-ons/accelerants/radeon_hd/display.cpp	line-too-long	1126
-src/add-ons/accelerants/radeon_hd/displayport.cpp	line-too-long	1124
+src/add-ons/accelerants/radeon_hd/displayport.cpp	line-too-long	1225
 src/add-ons/accelerants/radeon_hd/encoder.cpp	if-zero	721
 src/add-ons/accelerants/radeon_hd/encoder.cpp	if-zero	903
 src/add-ons/accelerants/radeon_hd/encoder.cpp	if-zero	1395
