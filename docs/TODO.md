@@ -181,21 +181,39 @@ current functional impact — Navi is DCN, out of scope for this AtomBIOS/DCE
 driver, and its table block stays behind `#if 0`.
 
 ### 12. Multi-monitor: remaining single-CRTC TODOs
-**In progress on `radeonhd/multi-monitor/v0.7.0`** — Track A milestone A1
-(clone/mirror) is implemented and awaiting a hardware test; see
-[`multi-monitor-track-a.md`](multi-monitor-track-a.md) for what landed and
-[`multi-monitor-analysis.md`](multi-monitor-analysis.md) for the design.
-Track B needs Haiku-side work and stays blocked on unmerged Gerrit 329.
+**On `radeonhd/multi-monitor/v0.7.0`** — Track A milestones **A1 (clone) and
+A2 (horizontal span) are both implemented and hardware-verified**: A1 on
+Caicos (DCE 5) and Bonaire (DCE 8), A2 on Bonaire at 2×1080p → a 3840×1080
+desktop, with Screen preferences' "Combine displays" and "Swap displays" both
+working. See [`multi-monitor-track-a.md`](multi-monitor-track-a.md) for what
+landed and [`multi-monitor-analysis.md`](multi-monitor-analysis.md) for the
+design. Track B needs Haiku-side work and stays blocked on unmerged
+Gerrit 329.
 
-Still display-0-only after A1, all of it mode-list and query surface rather
-than hardware bring-up: `src/.../accelerants/radeon_hd/mode.cpp:56`
-(`create_mode_list()` builds from head 0's EDID — correct for Track A,
-wrong for Track B), `:82`, `:92`, `:103` (mode count / mode list /
-preferred mode), `:123` (`radeon_get_edid_info()`), `:856-859`
-(`radeon_set_brightness()` — backlight assumes head 0 is the panel), and
-`display.cpp:1075` ("TODO: shared PLL detected!"). The identical-clock PLL sharing TODO in
-`pll_next_available()` becomes reachable with two heads and clone is its
-worst case, since both heads want the same clock.
+Still display-0-only, all of it mode-list and query surface rather than
+hardware bring-up — and all of it *correct* for Track A, which is one screen
+of one mode by design: `src/.../accelerants/radeon_hd/mode.cpp:56`
+(`create_mode_list()` builds from head 0's EDID), `:82`, `:92`, `:103` (mode
+count / mode list / preferred mode), `:123` (`radeon_get_edid_info()`),
+`:856-859` (`radeon_set_brightness()` — backlight assumes head 0 is the
+panel), and `display.cpp:1075` ("TODO: shared PLL detected!").
+
+Remaining work in rough priority order:
+
+- **Identical-clock PLL sharing** (`pll_next_available()` TODO). Reachable now
+  that two heads run, and clone/span are its worst case since both heads want
+  the same clock. Currently two PLLs are spent on one clock — fine for two
+  heads on a 2-PLL part, nothing left for a third.
+- **A3**: vertical span and mismatched heads. Also gated on power management,
+  since anything above 2×1080p needs memory reclocking (see item 1).
+- **Extend `bandwidth.cpp` beyond DCE 4/5.** DCE 6/8 currently get no
+  line-buffer split, DMIF handover or watermark programming at all. It did not
+  stop two-head 1080p on Bonaire, but nothing is protecting scanout there.
+- **Two-head test on a card whose DVI-I and HDMI share a UNIPHY.** Neither
+  test card exercised a DIG collision: Caicos' two heads are on different
+  UNIPHYs, and on Bonaire the two ports actually used (HDMI-A, DVI-I) are too.
+- Raising `MAX_DISPLAY` above 2 — display/connector matching work rather than
+  register plumbing, since `init_registers()` already handles CRTC 0–5.
 
 ### 13. Stale per-encoder TODO stubs (mostly diagnostic)
 `src/.../accelerants/radeon_hd/encoder.cpp:465`, `:1114`, `:2124`

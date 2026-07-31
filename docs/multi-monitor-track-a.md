@@ -10,8 +10,8 @@ Branch: `radeonhd/multi-monitor/v0.7.0`. Target release 0.7.0.
 
 | Milestone | State |
 |---|---|
-| A1 — clone / mirror | **implemented and hardware-verified** (Caicos, DCE 5, 2026-07-31) |
-| A2 — horizontal span | not started |
+| A1 — clone / mirror | **implemented and hardware-verified** — Caicos (DCE 5) and Bonaire (DCE 8), 2026-07-31 |
+| A2 — horizontal span | **implemented and hardware-verified** — Bonaire (DCE 8), 2×1080p → 3840×1080, 2026-07-31 |
 | A3 — vertical span, mismatched heads | not started (also gated on power management) |
 
 ---
@@ -275,6 +275,96 @@ DCE 5–8 AUX block layout and are still unverified in practice.
 
 ---
 
+## 2b. Milestone A2 — horizontal span
+
+**Works. Verified on Bonaire (DCE 8) 2026-07-31, first hardware attempt:** two
+1080p monitors on HDMI-A + DVI-I showing one 3840×1080 desktop, Screen
+preferences offering "Combine displays", and "Swap displays" correctly
+exchanging which monitor holds the left half.
+
+Off by default. Set `span_displays true` in
+`~/config/settings/kernel/drivers/radeon_hd`, same reasoning as
+`clone_displays`.
+
+### How it works
+
+Span is mostly a *mode list* feature, not a mode-set feature. app_server
+derives the desktop size from `virtual_width` on its own
+(`Screen::Frame()`), and Screen preferences decides a mode is "combined" by
+one rule in `get_combine_mode()` (`ScreenMode.cpp`): **B_SCROLL set, and
+`virtual_width == timing.h_display * 2`**. So the driver's whole job is:
+
+1. **Offer the modes.** `add_span_modes()` walks the list
+   `create_display_modes()` produced and appends a doubled-width variant of
+   every mode both heads accept — same timing, same per-head pixel clock,
+   `virtual_width` doubled, `B_SCROLL` set. On the test card that turned 55
+   base modes into 55 + 55.
+2. **Point the second CRTC at the right-hand half.** `assign_viewport_origins()`
+   gives the left head origin 0 and the right head origin
+   `timing.h_display`; `display_crtc_fb_set()` writes that to
+   `VIEWPORT_START`. That single register write *is* the span mechanism — the
+   hardcoded zero there was the last real blocker.
+3. **Answer B_PROPOSE_DISPLAY_MODE.** Not optional: Screen preferences hides
+   the combine menu entirely unless the multi-monitor handshake is answered
+   (`if (!multiMonSupport) fCombineField->Hide()` in `ScreenWindow.cpp`).
+
+`create_display_modes()` owns the area it allocates, so widening the list
+means building a fresh cloneable area and handing the old one back.
+`add_span_modes()` publishes the new list *before* deleting the old area so
+nothing can observe `mode_list` pointing into freed space.
+
+### The settings tunnel, and what actually travels over it
+
+Screen preferences talks to a multi-head accelerant through
+`B_PROPOSE_DISPLAY_MODE` using Thomas Kurschel's 2002 protocol, still spoken
+verbatim by `src/preferences/screen/multimon.cpp`. There is no public header;
+the definitions live in the *other* radeon driver's private
+`accelerant_ext.h`, so they are duplicated into
+`multimon_tunnel.h` with the protocol documented and a warning not to
+renumber them.
+
+Two independent things share the hook, and it is worth being precise because
+the analysis doc conflated them:
+
+- **The support handshake** gates UI visibility. `TestMultiMonSupport()` sets
+  `MULTIMON_REQUEST` on a real mode; we clear it and set `MULTIMON_REPLY`.
+- **The settings channel** carries swap-displays / use-laptop-panel /
+  TV-standard, recognised by an impossible `display_mode` (zero spaces,
+  `low` 0xffff², `high` 0x0, pixel clocks `'TKTK'`/`'KTKT'`). Setting code in
+  `h_display_start`, operation in `v_display_start`, value in `timing.flags`.
+
+**Combine itself does NOT come through the tunnel** — it is chosen purely
+from the mode list. Only swap-displays is answered; laptop-panel and
+TV-standard are refused, which makes Screen preferences hide controls that
+would otherwise do nothing.
+
+Screen preferences does not issue its own SetMode after a tunneled settings
+change, so the swap handler re-applies the current mode itself. It copies
+`shared_info.current_mode` first — passing a pointer into that field would
+have the mode set reading from something it concurrently overwrites.
+
+### Degradation
+
+A span mode with only one usable head still sets, and shows the left half of
+a desktop app_server already believes is twice as wide. Same rule as clone:
+never fail a mode set because a secondary head could not join.
+
+Undriven heads get their origins reset to 0, so a later single-head mode set
+cannot inherit a stale offset and scan out from the middle of the surface.
+
+### One bug caught by the first run
+
+The framebuffer-capacity guard compared bytes against
+`shared_info.frame_buffer_size` — which is in **kilobytes**, not bytes. The
+kernel driver multiplies it by 1024 wherever it wants an address range. The
+effect was that every span mode looked 1024× too expensive and the entire
+span list was rejected with `span needs 1792000 bytes, framebuffer is 262144`.
+Third unit-mismatch bug in this area of the driver (see the watermark
+investigation's "unit convention is the whole ballgame"); worth treating any
+size field here as suspect until its unit is checked at the definition.
+
+---
+
 ## 3. Not done yet
 
 - Identical-clock PLL sharing (`pll_next_available()` TODO) — clone is
@@ -311,4 +401,47 @@ DCE 5–8 AUX block layout and are still unverified in practice.
   desktop, which makes DPM/SMC support materially more valuable.
 - Two-head testing on a card whose DVI-I and HDMI share a UNIPHY is still
   outstanding — Caicos cannot exercise the DIG collision path, since its two
-  heads sit on different UNIPHYs.
+  heads sit on different UNIPHYs. **Bonaire did not close this either**: its DP
+  and HDMI-A do share UNIPHY2, but the two ports actually used (HDMI-A and
+  DVI-I) are on different PHYs.
+
+### Opened by the Bonaire run (A1 on DCE 8, and A2)
+
+- **A3 vertical span is the natural next milestone** and should be cheap:
+  `get_combine_mode()` already recognises it, so it is `virtual_height`, a y
+  offset, and letting `add_span_modes()` emit the vertical variant.
+- **`bandwidth.cpp` does nothing on DCE 6/8.** It is gated to DCE 4/5, so
+  Bonaire gets no line-buffer split, no DMIF buffer handover and no
+  watermarks. It did not stop two-head 1080p or 3840×1080 span there, but
+  nothing is protecting scanout on that card and a wider span probably will.
+  Extending it is the largest remaining piece of two-head work.
+- **`add_span_modes()` doubles the mode list.** 55 base modes became 55 + 55
+  on one monitor pair and 80 + 80 on another. That is fine functionally but it
+  makes the Screen preferences resolution list long; worth revisiting whether
+  span variants of very small modes (640×480 and friends) are worth offering.
+- **Span with mismatched heads is untested.** Both test monitors were 1080p.
+  The 1920×1200 and 4K panels in `TestHardware/monitors.txt` would exercise
+  the case A3 has to answer.
+- **DP on DCE 8 remains unverified**, not broken — the one DP test coincided
+  with a bench that also had a faulty HDMI cable, so it needs re-running
+  before any conclusion. See the note in §2c.
+
+### 2c. Two physical faults that read convincingly as driver bugs
+
+Recorded because both cost real time and both produced symptoms that pointed
+squarely at the driver:
+
+1. **A sleeping DP sink** made AUX report `flags not zero` twelve times with
+   *zero* timeouts, only in the two-monitor case, 100% reproducibly. A reboot
+   that woke the monitor fixed it. A dead sink gives timeouts; a *sleeping*
+   one gives flag errors, which look host-side.
+2. **An HDMI cable with intact DDC but marginal TMDS pairs** gave: EDID read
+   fine every time, boot icons visible, then garbled, then black. It survived
+   being blamed on clone, on bandwidth, on DIG assignment and on PLL choice —
+   and the fact that both failing ports happened to sit on UNIPHY2 made a very
+   convincing wrong hypothesis. Swapping the cable and rebooting fixed it.
+
+Practical rule for this bench: **exhaust cable, monitor and reboot before
+driver archaeology**, and note that cable changes need a reboot or an
+app_server restart because there is no hotplug support — `detect_displays()`
+only runs at accelerant init.

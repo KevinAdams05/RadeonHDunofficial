@@ -484,6 +484,12 @@ offering combine modes as a legacy option, or drops them in favour of
 API-v2 hooks. Nothing built for Track A is wasted except the
 `B_SCROLL` mode-list glue, which is small.
 
+> **Confirmed on hardware, 2026-07-31.** A1 and A2 both shipped with **zero
+> changes outside `src/add-ons/accelerants/radeon_hd/`** — no app_server
+> patch, no Haiku header change, no Screen preferences change. An unmodified
+> hrev59697 desktop spans two monitors as soon as the driver offers the modes
+> and answers the handshake. The central claim of this document held.
+
 ---
 
 ## 6. Track A: implementation plan (fork scope)
@@ -554,6 +560,28 @@ DCE4 datapoint. A clone test needs no new hardware.
    `src/preferences/screen/multimon.cpp` — get/set/enumerate for at
    minimum a combine setting and `ms_swap` (swap displays). That lights
    up the existing "Combine displays" and "Swap displays" menus.
+
+   > **Correction, 2026-07-31 (implementation).** There is **no combine
+   > setting in the tunnel** — the protocol only carries `ms_swap`,
+   > `ms_use_laptop_panel` and `ms_tv_standard`. Combine is selected purely
+   > from the **mode list**: `get_combine_mode()` in `ScreenMode.cpp` looks for
+   > `B_SCROLL` plus `virtual_width == timing.h_display * 2`, and
+   > `_GetDisplayMode()` searches the offered modes for that doubled width.
+   >
+   > The hook is still required, but for a different reason than assumed:
+   > `ScreenWindow.cpp:496` does `if (!multiMonSupport) fCombineField->Hide()`,
+   > so the **support handshake gates whether the combine menu is visible at
+   > all**. Answer `MULTIMON_REQUEST`/`MULTIMON_REPLY` and the menu appears;
+   > ignore it and horizontal span is unreachable from the GUI no matter how
+   > good the mode list is.
+   >
+   > Also worth knowing: Screen preferences does **not** issue its own SetMode
+   > after a tunneled settings change, so the swap handler has to re-apply the
+   > current mode itself. Both behaviours confirmed working on hardware.
+   >
+   > Step 4's open question is settled too: on DCE 5 and DCE 8,
+   > **`VIEWPORT_START` is the authoritative knob** —
+   > `GRPH_SURFACE_OFFSET_X` and `GRPH_X_START` stay at zero and span works.
 
 ### 6.3 Milestone A3 — vertical span, and the mismatched-monitor question
 
@@ -751,6 +779,36 @@ why voltage has to move first.
 The practical effect on the plan: Milestones A1 and A2 are unaffected —
 clone and dual-1080p span fit inside the current bandwidth. A3 and any
 large-monitor span should wait for the clock work.
+
+### 7.1 Correction, 2026-07-31 — the budget is per-board, and 1680 MB/s was optimistic
+
+Hardware testing revised the table above **downward**. The 1680 MB/s figure
+came from the Turks at PowerPlay level 1; it is not a floor that every board
+shares. On the **Caicos** test card `bandwidth_program_watermarks` reported
+only **866 MB/s available**, because that board is parked at a memory clock of
+154.8 MHz out of an advertised 900:
+
+| Mode, 2 heads | Per-head average | Total | vs 866 MB/s |
+|---|---|---|---|
+| 2 × 1024×768 | 198 MB/s | 396 | fits |
+| 2 × 1280×1024 | 327 MB/s | 654 | fits |
+| 2 × 1600×900 | 363 MB/s | 726 | fits |
+| 2 × 1920×1080 | **518 MB/s** | **1036** | **over budget** |
+
+So **2×1080p does not fit on a board at its memory floor** — the row marked
+"fits" above is wrong for Caicos. Confirmed visually: at 2×1080p the second
+head is garbled and the driver itself reports `latency … (NOT hidden by line
+buffer)`; at 1600×900 and below both heads are clean and the latency is
+hidden. Dual-head on that card tops out at **1600×900**.
+
+Bonaire, by contrast, drove 2×1080p clone *and* 3840×1080 span cleanly.
+
+Two lessons: the shape of the argument holds (span roughly doubles average
+scanout demand, and power management is the real unlock), but **the specific
+budget has to be read per board out of `bandwidth_program_watermarks` rather
+than assumed** — and the driver's own "hidden by line buffer" flag turned out
+to predict the visible corruption exactly, which makes it a usable
+go/no-go signal.
 
 ---
 
