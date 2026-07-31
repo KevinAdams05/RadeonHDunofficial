@@ -10,7 +10,7 @@ Branch: `radeonhd/multi-monitor/v0.7.0`. Target release 0.7.0.
 
 | Milestone | State |
 |---|---|
-| A1 — clone / mirror | **implemented, awaiting hardware test** |
+| A1 — clone / mirror | **implemented and hardware-verified** (Caicos, DCE 5, 2026-07-31) |
 | A2 — horizontal span | not started |
 | A3 — vertical span, mismatched heads | not started (also gated on power management) |
 
@@ -165,6 +165,116 @@ working head 0, never a failed mode set.
 
 ---
 
+## 2a. Results — Caicos XT, DCE 5, 2026-07-31
+
+**A1 clone works.** Both monitors showed the same desktop on the first boot
+that had `clone_displays` set. Every step of §2 passed.
+
+Test rig: Radeon HD 7470/8470 OEM (**Caicos XT, `1002:6778`**, DCE 5, 2 DRAM
+channels) on the Supermicro X11SSH-LN4F, hrev59697. Two 1080p monitors, one
+on DisplayPort and one on DVI-I. `raise_clocks true` was already set from the
+power-management work; `clone_displays true` added for this run.
+
+This is the fork's **first Caicos datapoint** and the first two-head one. Note
+it is a *different* card from the Turks/Bonaire the plan expected — Caicos was
+listed as untested in the watermark investigation.
+
+### Connector topology — only two physical ports
+
+`connector_probe` reports three paths for two connectors:
+
+| Connector | Port | Encoder | i2c / HPD gpio | DIG |
+|---|---|---|---|---|
+| #0 | DisplayPort | UNIPHY1, enum 2 (link B) | 0x93 / 0x2 | 3 |
+| #1 | DVI-I digital | UNIPHY, enum 1 (link A) | 0x92 / 0x4 | 0 |
+| #2 | DVI-I **analog** | DAC1 (TV DAC), CRT1 | 0x92 / 0x4 | — |
+
+Connectors #1 and #2 share both GPIO pins because they are the digital and
+analog halves of one physical DVI-I connector. #2 reads the *same* monitor's
+EDID over the shared DDC line and is then correctly rejected by
+`encoder_analog_load_detect()`. It is not a second monitor, so **dual-head on
+this card means DP + DVI, with no third option.**
+
+The two heads land on **different UNIPHYs**, so the DIG/UNIPHY collision
+predicted first in §2 did not occur. Worth keeping in mind that this card
+cannot demonstrate that failure mode either way.
+
+### What the syslog confirmed
+
+- `select_clone_heads: cloning across 2 head(s)`
+- `set_mode_on_head: display 0 → pll 2`, `display 1 → pll 0` — **different
+  PLLs**, the regression `release_pll_assignments()` exists for
+- `bandwidth_update: 2 active head(s)`, and the line buffer halved correctly:
+  **`line buffer 8192 px` with two heads, `16384 px` with one** (the
+  `D1HALF_D2HALF` vs `D1_ONLY` partitions)
+- `mode set complete on 2 head(s)`
+- **Zero `Unable to find a PLL!` across five consecutive mode sets**, with the
+  assignment stable at pll 2 / pll 0 every time. The release bug would have
+  surfaced here.
+- DPMS iterates: powerdown blanks CRTC 0 *and* CRTC 1, powerup restores both.
+- `clone_displays false` + app_server restart → `blanking undriven head 1`,
+  `mode set complete on 1 head(s)`, and the second monitor goes dark rather
+  than holding a stale image.
+
+### The one visible defect is bandwidth, and it is the known PM blocker
+
+At **2 × 1920×1080 the DVI head is garbled** while the DP head is clean. The
+driver diagnoses it itself:
+
+```
+powerplay: running at the LOWEST advertised memory clock
+           (154820 of up to 900000 kHz) - scanout bandwidth is at its floor
+bandwidth: available 866 MB/s, display share 371 MB/s, mode average 518 MB/s
+latency 39987 ns (NOT hidden by line buffer)
+```
+
+Two heads at 518 MB/s each is 1036 MB/s against 866 MB/s available. Confirmed
+causally by walking modes — the driver's own "hidden by line buffer" flag
+tracks the visible garbling exactly:
+
+| Mode | pixel clock | mode average | 2-head total | latency hidden? | visually |
+|---|---|---|---|---|---|
+| 1024×768 | 64996 kHz | 198 MB/s | 396 | hidden | clean |
+| 1280×1024 | 107964 kHz | 327 MB/s | 654 | hidden | clean |
+| 1600×900 | 120331 kHz | 363 MB/s | 726 | hidden | clean |
+| 1920×1080 | 148500 kHz | **518 MB/s** | **1036** | **NOT hidden** | **DVI garbled** |
+
+So the **dual-head ceiling on this board is 1600×900**, and it is set by the
+memory clock, not by the clone code: 154.8 MHz of an advertised 900 MHz. That
+is [`power-management-investigation.md`](power-management-investigation.md)'s
+finding — `raise_clocks` lifts only
+the engine clock, and memory reclocking silently no-ops on Northern Islands
+because it needs DPM/SMC. Nothing in A1 can work around it.
+
+This also **revises §7.1 of the analysis downward.** That table assumed
+~1680 MB/s at PowerPlay level 1 and concluded 2×1080p (≈1036 MB/s) fits. On a
+board parked at its memory floor there is only 866 MB/s, so 2×1080p does *not*
+fit. The shape of the argument holds; the specific budget is per-board and has
+to be read from `bandwidth_program_watermarks` rather than assumed.
+
+### One gotcha that cost time: a sleeping DP sink
+
+The first boot with both monitors attached failed to detect the DP monitor at
+all — `dp_aux_speak: dp_aux channel flags not zero!` twelve times, then
+`ddc2_dp_read_edid1: error reading EDID data at index 0`. The DVI monitor came
+up fine, so it looked like DP-vs-DVI interference.
+
+It was not. The DP monitor had gone to sleep, and a sleeping sink makes the
+AUX engine report flag errors rather than a clean timeout. **A reboot that
+woke the monitor fixed it** and DP EDID then read on the first try. Worth
+knowing because the symptom points at the driver: the failure was 100%
+reproducible within that boot, appeared only in the two-monitor case, and
+never once reported the timeout you would expect from an absent sink.
+
+`dp_aux_dump_state()` was added while chasing this — it decodes AUX_SW_STATUS
+after AtomBIOS reports a failure, because AtomBIOS collapses every AUX error
+into one status byte and cannot distinguish "sink never answered" from "engine
+was never brought up". **It has not yet fired on real hardware**, since AUX
+started working before it was deployed; the register offsets are from the
+DCE 5–8 AUX block layout and are still unverified in practice.
+
+---
+
 ## 3. Not done yet
 
 - Identical-clock PLL sharing (`pll_next_available()` TODO) — clone is
@@ -179,4 +289,26 @@ working head 0, never a failed mode set.
   scope for A1.
 - Per-CRTC LUT/gamma in `B_CMAP8` is untested with two heads. Both loaders
   are already per-CRTC and both get called, so it should be consistent by
-  construction.
+  construction. (`display_dce45_crtc_load_lut` was observed running for
+  crtcID 0 and 1 on the Caicos run, so both do get invoked.)
+
+### Opened by the Caicos run
+
+- **Identical-clock PLL sharing is now the top A1 follow-up, and it is a
+  bandwidth question rather than a correctness one.** Both heads want the same
+  clock in clone, and the allocator spends two PLLs on it (pll 2 + pll 0).
+  That works on a 2-PLL part with 2 heads but leaves nothing for a third.
+- **`dp_aux_dump_state()` has never fired.** Validate it by detaching the DP
+  monitor and restarting app_server — AUX should then fail and the dump should
+  print a plausible `AUX_SW_STATUS` with `RX_HPD_DISCON` set. Until that runs,
+  treat its register offsets as unverified.
+- **A sleeping DP sink is indistinguishable from a driver fault** in the
+  current logging (§2a). Reading HPD sense before attempting AUX, and saying
+  so in the log, would have saved the whole detour. Cheap and worth doing.
+- **The 2×1080p garbling is the first visible symptom the power-management
+  work would fix.** Previously the memory-clock floor only showed up as
+  pixel-clock caps on single-head modes; it now costs a working dual-1080p
+  desktop, which makes DPM/SMC support materially more valuable.
+- Two-head testing on a card whose DVI-I and HDMI share a UNIPHY is still
+  outstanding — Caicos cannot exercise the DIG collision path, since its two
+  heads sit on different UNIPHYs.
