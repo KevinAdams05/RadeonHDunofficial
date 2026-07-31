@@ -205,12 +205,44 @@ Remaining work in rough priority order:
   the same clock. Currently two PLLs are spent on one clock — fine for two
   heads on a 2-PLL part, nothing left for a third.
 - **Extend `bandwidth.cpp` beyond DCE 4/5 — now a blocker, not a nicety.**
-  DCE 6/8 get no line-buffer split, DMIF handover or watermark programming at
-  all. Clone and horizontal span survived without it; **vertical span does
-  not** — 1920×2160 shows artifacts on Bonaire while 1024×1536 is clean, and
-  3840×1080 (same pixel count) is clean, so it is access pattern rather than
-  raw bandwidth. Linux routes DCE 6+ through `dce6_bandwidth_update()` and the
-  `DPG_PIPE_*` block; `si_reg.h` already has those as `SI_DPG_PIPE_*`.
+  DCE 6/8 get no line-buffer partition, no DMIF buffer handover and no latency
+  watermark at all. Clone and horizontal span survived without it; **vertical
+  span does not** — on Bonaire 1920×2160 shows artifacts while 1024×1536 is
+  clean, and 3840×1080 (identical pixel count and per-head demand) is clean, so
+  it is DRAM access pattern rather than raw bandwidth.
+
+  Groundwork already done (2026-07-31), so this can start immediately:
+
+  - **DCE 8 is per-CRTC, not per-pair.** `dce8_bandwidth_update()` calls
+    `dce8_line_buffer_adjust(crtc, mode)` with a single mode — there is no
+    partner-mode argument and no half/half split. Six line buffers, one per
+    controller, three partitions each, selected by that head's own width:
+    `<1920` → config 1 / alloc 2 / 1920×2 px; `<2560` → config 2 / alloc 2 /
+    2560×2; `<4096` → config 0 / alloc 4 (2 on IGP) / 4096×2. This is a
+    *better* fit for span than DCE 4/5, since each head is sized independently.
+    DCE 6 keeps the paired form (`dce6_line_buffer_adjust(crtc, mode0, mode1)`).
+  - **The registers differ from DCE 6 in ways that are easy to get wrong**, and
+    none of them are in the fork's `sea_reg.h` yet:
+    - `LB_MEMORY_CTRL` = **0x6b04** on DCE 8, with `LB_MEMORY_SIZE(x)` at
+      bits 0+ and `LB_MEMORY_CONFIG(x)` at bits **20+**; Linux writes
+      `LB_MEMORY_CONFIG(tmp) | LB_MEMORY_SIZE(0x6B0)`. DCE 6 instead uses
+      `DC_LB_MEMORY_SPLIT` = **0x6b0c** (already in the base tree's
+      `si_reg.h` as `SI_DC_LB_MEMORY_SPLIT`, config at bits 20+). **DCE 4/5
+      uses 0x6b0c with the config field at bits [2:0] as a bare write** — three
+      different conventions across four generations, and the fork has already
+      shipped one bug from confusing exactly these two field positions.
+    - `0x6cc8` is `DPG_WATERMARK_MASK_CONTROL` on DCE 8 but
+      `DPG_PIPE_ARBITRATION_CONTROL3` on DCE 6 — same address, different
+      register. `DPG_PIPE_LATENCY_CONTROL` = 0x6ccc on both.
+    - `PIPE0_DMIF_BUFFER_CONTROL` = 0x0ca0 with pipe stride **0x20**, and
+      `DMIF_BUFFERS_ALLOCATED_COMPLETED` = 1 << 4 to poll — same as DCE 4.1/5.
+  - Watch the unit conventions (`bandwidth.cpp` uses MB/s, ns, kHz with
+    `uint64` intermediates); `dce8_program_watermarks()` is ~127 lines of
+    Linux fixed-point that has to be mapped onto those, and this area of the
+    driver has produced three unit/field bugs already.
+  - **Gate it off by default** (`raise_clocks` / `clone_displays` /
+    `span_displays` set the precedent) — it writes the live scanout path on
+    boards that currently work without it.
 - **A3 mismatched heads.** Vertical span itself is done. Mismatched
   resolutions remain, and are also gated on power management since anything
   above 2×1080p needs memory reclocking (see item 1).
