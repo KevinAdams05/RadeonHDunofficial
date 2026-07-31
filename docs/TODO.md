@@ -204,11 +204,16 @@ Remaining work in rough priority order:
   that two heads run, and clone/span are its worst case since both heads want
   the same clock. Currently two PLLs are spent on one clock — fine for two
   heads on a 2-PLL part, nothing left for a third.
-- **A3**: vertical span and mismatched heads. Also gated on power management,
-  since anything above 2×1080p needs memory reclocking (see item 1).
-- **Extend `bandwidth.cpp` beyond DCE 4/5.** DCE 6/8 currently get no
-  line-buffer split, DMIF handover or watermark programming at all. It did not
-  stop two-head 1080p on Bonaire, but nothing is protecting scanout there.
+- **Extend `bandwidth.cpp` beyond DCE 4/5 — now a blocker, not a nicety.**
+  DCE 6/8 get no line-buffer split, DMIF handover or watermark programming at
+  all. Clone and horizontal span survived without it; **vertical span does
+  not** — 1920×2160 shows artifacts on Bonaire while 1024×1536 is clean, and
+  3840×1080 (same pixel count) is clean, so it is access pattern rather than
+  raw bandwidth. Linux routes DCE 6+ through `dce6_bandwidth_update()` and the
+  `DPG_PIPE_*` block; `si_reg.h` already has those as `SI_DPG_PIPE_*`.
+- **A3 mismatched heads.** Vertical span itself is done. Mismatched
+  resolutions remain, and are also gated on power management since anything
+  above 2×1080p needs memory reclocking (see item 1).
 - **Two-head test on a card whose DVI-I and HDMI share a UNIPHY.** Neither
   test card exercised a DIG collision: Caicos' two heads are on different
   UNIPHYs, and on Bonaire the two ports actually used (HDMI-A, DVI-I) are too.

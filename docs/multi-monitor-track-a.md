@@ -12,7 +12,8 @@ Branch: `radeonhd/multi-monitor/v0.7.0`. Target release 0.7.0.
 |---|---|
 | A1 — clone / mirror | **implemented and hardware-verified** — Caicos (DCE 5) and Bonaire (DCE 8), 2026-07-31 |
 | A2 — horizontal span | **implemented and hardware-verified** — Bonaire (DCE 8), 2×1080p → 3840×1080, 2026-07-31 |
-| A3 — vertical span, mismatched heads | not started (also gated on power management) |
+| A3 — vertical span | **implemented; works, but bandwidth-limited** — clean at 1024×1536 on Bonaire, artifacts at 1920×2160. Blocked on extending `bandwidth.cpp` past DCE 4/5 |
+| A3 — mismatched heads | not started (also gated on power management) |
 
 ---
 
@@ -425,6 +426,55 @@ size field here as suspect until its unit is checked at the definition.
 - **DP on DCE 8 remains unverified**, not broken — the one DP test coincided
   with a bench that also had a faulty HDMI cable, so it needs re-running
   before any conclusion. See the note in §2c.
+
+## 2d. Milestone A3 — vertical span
+
+**Implemented and working, but bandwidth-limited on DCE 8.** Screen
+preferences' "Combine displays: vertically" now produces a stacked desktop:
+head 0 shows y=0, head 1 shows y=`timing.v_display`.
+
+Vertical was cheap once A2 existed — `get_combine_mode()` already recognises
+it, so it was a `span_orientation` enum in place of A2's boolean, a
+`viewportOriginY` in place of `viewportOriginX`, and `add_span_modes()`
+emitting both variants per base mode. On the test card 80 base modes became
+80 horizontal + 80 vertical.
+
+### It exposes a real bandwidth problem that horizontal did not
+
+On Bonaire, at 2×1080p:
+
+| Span | Surface | Result |
+|---|---|---|
+| Horizontal | 3840×1080 | **clean** |
+| Vertical | 1920×2160 | **artifacts** |
+| Vertical | 1024×1536 | **clean** |
+
+Those first two surfaces have the **same pixel count and the same per-head
+scanout demand**, so this is not raw bandwidth — it is access pattern.
+Under horizontal span the two heads read different halves of the *same
+scanlines*, so their DRAM accesses stay within the same rows and pages. Under
+vertical span head 0 reads rows 0–1079 and head 1 reads rows 1080–2159 — two
+independent streams about 8 MB apart, thrashing different banks. Confirmed
+causally: dropping to a quarter of the demand (1024×1536) makes it clean.
+
+**And nothing is arbitrating scanout on this card.** `bandwidth.cpp` is gated
+to DCE 4/5, so on DCE 6/8 there is no line-buffer split, no DMIF buffer
+handover and no latency watermark — whatever the VBIOS left stands. That was
+survivable for clone and for horizontal span; vertical span is the first
+configuration that actually needs it.
+
+So **extending `bandwidth.cpp` to DCE 6/8 is a prerequisite for vertical span
+at native resolution**, and is the next piece of work rather than an
+optional improvement. Linux routes these parts through
+`dce6_bandwidth_update()` using the `DPG_PIPE_*` block, and the fork's
+`si_reg.h` already carries those definitions as `SI_DPG_PIPE_*` (see the
+watermark investigation, which established that the `NI_DPG_*` naming was
+wrong and that they are DCE 6+).
+
+Vertical span is left enabled: it is correct, it degrades to visible
+artifacts rather than a failed mode set, and it is behind `span_displays`.
+
+---
 
 ### 2c. Two physical faults that read convincingly as driver bugs
 

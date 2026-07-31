@@ -51,33 +51,58 @@ extern "C" void _sPrintf(const char* format, ...);
 static bool is_mode_supported_on_display(display_mode* mode, uint32 crtid);
 
 
-/*!	Is this a horizontal-span mode?
+/*!	How a span mode divides the surface between heads.
+
+	Mirrors Screen preferences' combine_mode, but kept local: the driver only
+	ever needs to know which axis to offset the second head along. */
+enum span_orientation {
+	kSpanNone = 0,
+	kSpanHorizontal,
+	kSpanVertical
+};
+
+
+/*!	Which way, if either, does this mode span?
 
 	The test is Screen preferences' own, from get_combine_mode() in
-	ScreenMode.cpp: B_SCROLL set, and a virtual_width of exactly twice the
-	per-head h_display. Matching it exactly matters — app_server and Screen
-	preferences decide a mode is "combined" by this rule, so if we programmed
-	span on any other basis the two would disagree about the desktop size. */
-static bool
-is_horizontal_span_mode(const display_mode* mode)
+	ScreenMode.cpp: B_SCROLL set, and a virtual size that is exactly twice the
+	per-head size in one axis. Matching it exactly matters — app_server and
+	Screen preferences decide a mode is "combined" by this rule, so if we
+	programmed span on any other basis the two would disagree about the desktop
+	size. Horizontal is tested first, for the same reason it is there: a mode
+	that somehow doubled both axes is treated as horizontal rather than
+	ambiguous. */
+static span_orientation
+span_orientation_of(const display_mode* mode)
 {
 	if ((mode->flags & B_SCROLL) == 0)
-		return false;
+		return kSpanNone;
 
-	return mode->virtual_width == mode->timing.h_display * 2
-		&& mode->virtual_height == mode->timing.v_display;
+	if (mode->virtual_width == mode->timing.h_display * 2
+		&& mode->virtual_height == mode->timing.v_display)
+		return kSpanHorizontal;
+
+	if (mode->virtual_height == mode->timing.v_display * 2
+		&& mode->virtual_width == mode->timing.h_display)
+		return kSpanVertical;
+
+	return kSpanNone;
 }
 
 
-/*!	Add horizontal-span variants of the offered modes.
+/*!	Add span variants of the offered modes, horizontal and vertical.
 
 	A span mode is an ordinary mode — same timing, same per-head pixel clock —
-	carrying a framebuffer twice as wide and the B_SCROLL flag. app_server
-	derives the desktop size from virtual_width all by itself
-	(Screen::Frame()), so advertising these is all it takes for the desktop to
-	become 2 x wide; the driver's part is pointing the second CRTC at the
-	right-hand half, which display_crtc_fb_set() does from
-	display_info::viewportOriginX.
+	carrying a framebuffer twice as large in one axis, plus the B_SCROLL flag.
+	app_server derives the desktop size from virtual_width/virtual_height all
+	by itself (Screen::Frame()), so advertising these is all it takes for the
+	desktop to double; the driver's part is pointing the second CRTC at the
+	far half, which display_crtc_fb_set() does from
+	display_info::viewportOriginX / viewportOriginY.
+
+	Both orientations are offered. Screen preferences exposes them as "Combine
+	displays: horizontally / vertically", and picks between them purely by the
+	virtual size it finds in this list.
 
 	Gated on span_displays, off by default, for the same reason clone is: a
 	second head that mode-sets badly costs the user the working display they
@@ -111,53 +136,72 @@ add_span_modes(void)
 	display_mode* baseList = gInfo->mode_list;
 
 	// Which of the offered modes can actually be spanned? Both heads have to
-	// accept the timing, and the double-width surface has to fit the mapped
-	// framebuffer.
+	// accept the timing, and the doubled surface has to fit the mapped
+	// framebuffer. Each base mode can yield up to two variants, horizontal and
+	// vertical, so the scratch list is sized for both.
 	display_mode* spanList = (display_mode*)malloc(
-		baseCount * sizeof(display_mode));
+		2 * baseCount * sizeof(display_mode));
 	if (spanList == NULL)
 		return B_NO_MEMORY;
 
+	static const span_orientation kOrientations[]
+		= { kSpanHorizontal, kSpanVertical };
+
 	uint32 spanCount = 0;
+	uint32 horizontalCount = 0;
 	for (uint32 i = 0; i < baseCount; i++) {
-		display_mode candidate = baseList[i];
-
-		// Already a span mode, or too wide to double without overflowing the
-		// 16-bit virtual_width.
-		if (is_horizontal_span_mode(&candidate)
-			|| candidate.timing.h_display > 0x7fff)
+		// Already a span mode; doubling it again would be meaningless.
+		if (span_orientation_of(&baseList[i]) != kSpanNone)
 			continue;
 
-		candidate.virtual_width = candidate.timing.h_display * 2;
-		candidate.virtual_height = candidate.timing.v_display;
-		candidate.flags |= B_SCROLL;
+		for (uint32 o = 0; o < B_COUNT_OF(kOrientations); o++) {
+			display_mode candidate = baseList[i];
+			span_orientation orientation = kOrientations[o];
 
-		if (!is_mode_supported_on_display(&candidate, 0)
-			|| !is_mode_supported_on_display(&candidate, 1))
-			continue;
+			// virtual_width / virtual_height are 16-bit, so refuse anything
+			// that would overflow when doubled rather than wrapping.
+			if (orientation == kSpanHorizontal) {
+				if (candidate.timing.h_display > 0x7fff)
+					continue;
+				candidate.virtual_width = candidate.timing.h_display * 2;
+				candidate.virtual_height = candidate.timing.v_display;
+			} else {
+				if (candidate.timing.v_display > 0x7fff)
+					continue;
+				candidate.virtual_width = candidate.timing.h_display;
+				candidate.virtual_height = candidate.timing.v_display * 2;
+			}
+			candidate.flags |= B_SCROLL;
 
-		// Bytes per row is derived from virtual_width, so a span surface costs
-		// twice the memory of the same mode unspanned.
-		//
-		// shared_info.frame_buffer_size is in KILOBYTES, not bytes — the
-		// kernel driver stores the BAR size that way and multiplies by 1024
-		// wherever it needs an address range. Comparing bytes against it
-		// directly makes every span mode look 1024x too expensive.
-		uint32 bytesPerPixel = (candidate.space == B_CMAP8) ? 1
-			: ((candidate.space == B_RGB15_LITTLE
-				|| candidate.space == B_RGB16_LITTLE) ? 2 : 4);
-		uint64 needed = (uint64)candidate.virtual_width
-			* candidate.virtual_height * bytesPerPixel;
-		uint64 available = (uint64)info.frame_buffer_size * 1024;
-		if (needed > available) {
-			TRACE("%s: %" B_PRIu16 "x%" B_PRIu16 " span needs %" B_PRIu64
-				" bytes, framebuffer is %" B_PRIu64 " - skipping\n", __func__,
-				candidate.virtual_width, candidate.virtual_height, needed,
-				available);
-			continue;
+			if (!is_mode_supported_on_display(&candidate, 0)
+				|| !is_mode_supported_on_display(&candidate, 1))
+				continue;
+
+			// Bytes per row is derived from virtual_width, so a span surface
+			// costs twice the memory of the same mode unspanned.
+			//
+			// shared_info.frame_buffer_size is in KILOBYTES, not bytes — the
+			// kernel driver stores the BAR size that way and multiplies by
+			// 1024 wherever it needs an address range. Comparing bytes against
+			// it directly makes every span mode look 1024x too expensive.
+			uint32 bytesPerPixel = (candidate.space == B_CMAP8) ? 1
+				: ((candidate.space == B_RGB15_LITTLE
+					|| candidate.space == B_RGB16_LITTLE) ? 2 : 4);
+			uint64 needed = (uint64)candidate.virtual_width
+				* candidate.virtual_height * bytesPerPixel;
+			uint64 available = (uint64)info.frame_buffer_size * 1024;
+			if (needed > available) {
+				TRACE("%s: %" B_PRIu16 "x%" B_PRIu16 " span needs %" B_PRIu64
+					" bytes, framebuffer is %" B_PRIu64 " - skipping\n",
+					__func__, candidate.virtual_width,
+					candidate.virtual_height, needed, available);
+				continue;
+			}
+
+			if (orientation == kSpanHorizontal)
+				horizontalCount++;
+			spanList[spanCount++] = candidate;
 		}
-
-		spanList[spanCount++] = candidate;
 	}
 
 	if (spanCount == 0) {
@@ -192,8 +236,9 @@ add_span_modes(void)
 	info.mode_count = totalCount;
 	delete_area(oldArea);
 
-	TRACE("%s: added %" B_PRIu32 " span mode(s) to %" B_PRIu32
-		" base mode(s)\n", __func__, spanCount, baseCount);
+	TRACE("%s: added %" B_PRIu32 " span mode(s) to %" B_PRIu32 " base mode(s)"
+		" (%" B_PRIu32 " horizontal, %" B_PRIu32 " vertical)\n", __func__,
+		spanCount, baseCount, horizontalCount, spanCount - horizontalCount);
 
 	return B_OK;
 }
@@ -418,7 +463,8 @@ release_pll_assignments()
 
 	Returns the number of heads selected, always at least one. */
 static uint32
-select_clone_heads(display_mode* mode, bool* heads, bool span)
+select_clone_heads(display_mode* mode, bool* heads,
+	span_orientation orientation)
 {
 	radeon_shared_info &info = *gInfo->shared_info;
 
@@ -432,13 +478,15 @@ select_clone_heads(display_mode* mode, bool* heads, bool span)
 	// sized the desktop to virtual_width — so it does not also need the clone
 	// gate. Clone, which is indistinguishable from a plain single-head mode
 	// from the mode alone, does.
-	if (!span && !radeon_setting_enabled("clone_displays"))
+	if (orientation == kSpanNone
+		&& !radeon_setting_enabled("clone_displays"))
 		return headCount;
 
 	if (info.dceMajor < 4) {
 		TRACE("%s: %s set, but DCE %" B_PRIu8 " has no PLL allocator - "
 			"driving head 0 only\n", __func__,
-			span ? "span mode requested" : "clone_displays", info.dceMajor);
+			orientation != kSpanNone ? "span mode requested" : "clone_displays",
+			info.dceMajor);
 		return headCount;
 	}
 
@@ -459,7 +507,7 @@ select_clone_heads(display_mode* mode, bool* heads, bool span)
 	}
 
 	TRACE("%s: %s across %" B_PRIu32 " head(s)\n", __func__,
-		span ? "spanning" : "cloning", headCount);
+		orientation != kSpanNone ? "spanning" : "cloning", headCount);
 
 	return headCount;
 }
@@ -467,22 +515,25 @@ select_clone_heads(display_mode* mode, bool* heads, bool span)
 
 /*!	Give each driven head its origin in the shared surface.
 
-	Clone puts every head at (0,0). Horizontal span leaves the left head at 0
-	and starts the right head one screen-width in — that offset, written to
-	VIEWPORT_START by display_crtc_fb_set(), is the entire span mechanism.
+	Clone puts every head at (0,0). Span leaves the first head at the origin
+	and offsets the second by one screen along the spanned axis — one
+	screen-width for horizontal, one screen-height for vertical. That offset,
+	written to VIEWPORT_START by display_crtc_fb_set(), is the entire span
+	mechanism.
 
 	Heads that are not driven are reset to 0 too, so a later single-head mode
 	set cannot inherit a stale offset and scan out from the middle of the
 	surface. */
 static void
-assign_viewport_origins(display_mode* mode, bool* heads, bool span)
+assign_viewport_origins(display_mode* mode, bool* heads,
+	span_orientation orientation)
 {
 	for (uint32 id = 0; id < MAX_DISPLAY; id++) {
 		gDisplay[id]->viewportOriginX = 0;
 		gDisplay[id]->viewportOriginY = 0;
 	}
 
-	if (!span)
+	if (orientation == kSpanNone)
 		return;
 
 	// Collect the driven heads in head order.
@@ -495,30 +546,37 @@ assign_viewport_origins(display_mode* mode, bool* heads, bool span)
 
 	if (drivenCount < 2) {
 		// Degraded rather than failed, the same rule clone follows: the mode
-		// still sets, the user just sees the left half of a desktop that
-		// app_server already believes is twice as wide.
+		// still sets, the user just sees the first half of a desktop that
+		// app_server already believes is twice as large.
 		TRACE("%s: span mode with only %" B_PRIu32 " head(s) - showing the "
-			"left half only\n", __func__, drivenCount);
+			"first half only\n", __func__, drivenCount);
 		return;
 	}
 
-	uint32 leftHead = driven[0];
-	uint32 rightHead = driven[1];
+	uint32 firstHead = driven[0];
+	uint32 secondHead = driven[1];
 
 	// "Swap displays" in Screen preferences, arriving through the settings
-	// tunnel, decides which physical monitor is the left half.
+	// tunnel, decides which physical monitor holds the first half.
 	if (gInfo->swapDisplays) {
-		uint32 swap = leftHead;
-		leftHead = rightHead;
-		rightHead = swap;
+		uint32 swap = firstHead;
+		firstHead = secondHead;
+		secondHead = swap;
 	}
 
-	gDisplay[leftHead]->viewportOriginX = 0;
-	gDisplay[rightHead]->viewportOriginX = mode->timing.h_display;
-
-	TRACE("%s: span: head %" B_PRIu32 " shows x=0, head %" B_PRIu32 " shows x=%"
-		B_PRIu16 "%s\n", __func__, leftHead, rightHead, mode->timing.h_display,
-		gInfo->swapDisplays ? " (swapped)" : "");
+	if (orientation == kSpanHorizontal) {
+		gDisplay[secondHead]->viewportOriginX = mode->timing.h_display;
+		TRACE("%s: horizontal span: head %" B_PRIu32 " at x=0, head %" B_PRIu32
+			" at x=%" B_PRIu16 "%s\n", __func__, firstHead, secondHead,
+			mode->timing.h_display,
+			gInfo->swapDisplays ? " (swapped)" : "");
+	} else {
+		gDisplay[secondHead]->viewportOriginY = mode->timing.v_display;
+		TRACE("%s: vertical span: head %" B_PRIu32 " at y=0, head %" B_PRIu32
+			" at y=%" B_PRIu16 "%s\n", __func__, firstHead, secondHead,
+			mode->timing.v_display,
+			gInfo->swapDisplays ? " (swapped)" : "");
+	}
 }
 
 
@@ -598,17 +656,19 @@ radeon_set_display_mode(display_mode* mode)
 	if (!is_mode_supported(mode))
 		return B_BAD_VALUE;
 
-	bool span = is_horizontal_span_mode(mode);
-	if (span) {
-		TRACE("%s: horizontal span requested: %" B_PRIu16 " wide surface, %"
-			B_PRIu16 " per head\n", __func__, mode->virtual_width,
-			mode->timing.h_display);
+	span_orientation orientation = span_orientation_of(mode);
+	if (orientation != kSpanNone) {
+		TRACE("%s: %s span requested: %" B_PRIu16 "x%" B_PRIu16 " surface, %"
+			B_PRIu16 "x%" B_PRIu16 " per head\n", __func__,
+			orientation == kSpanHorizontal ? "horizontal" : "vertical",
+			mode->virtual_width, mode->virtual_height,
+			mode->timing.h_display, mode->timing.v_display);
 	}
 
 	bool heads[MAX_DISPLAY];
-	uint32 headCount = select_clone_heads(mode, heads, span);
+	uint32 headCount = select_clone_heads(mode, heads, orientation);
 
-	assign_viewport_origins(mode, heads, span);
+	assign_viewport_origins(mode, heads, orientation);
 
 	// Clear the recorded mode of every head this configuration will not drive.
 	// display_crtc_fb_set() publishes currentMode for the heads that are
