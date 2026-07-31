@@ -1,0 +1,25 @@
+# Line endings are LF everywhere, matching upstream Haiku.
+#
+# Without this the repo drifts: seven source files had accumulated CRLF while
+# their neighbours were LF, and a routine edit that rewrote one of them
+# produced a 1090-line whitespace diff around a 20-line change — enough to
+# hide the real work from review entirely.
+#
+# scripts/style-check.py enforces the same rule at release time, so a file
+# that somehow arrives with CRLF is caught rather than committed.
+
+* text=auto eol=lf
+
+# Belt and braces for what this repo actually carries.
+*.c    text eol=lf
+*.cpp  text eol=lf
+*.h    text eol=lf
+*.md   text eol=lf
+*.py   text eol=lf
+*.sh   text eol=lf
+*.svg  text eol=lf
+*.rdef text eol=lf
+Jamfile text eol=lf
+
+# Built packages are binary; never touch them.
+*.hpkg binary
