@@ -35,53 +35,6 @@
 #define ERROR(x...) _sPrintf("radeon_hd: " x)
 
 
-/*!	Current engine clock in kHz via the AtomBIOS GetEngineClock command
-	table, or 0 if the table is missing or answers zero.
-
-	FirmwareInfo's ulDefaultEngineClock is a table *default*, not the clock
-	the card is running at: on a Turks HD 6570 it reads 100 MHz against a
-	650 MHz operating spec, because the VBIOS posts a low-power state and
-	Haiku has no power management to raise it. The display bandwidth
-	arbitration in bandwidth.cpp needs the real clock — a 6x error in the
-	memory clock is a 6x error in the DRAM bandwidth ceiling. Linux reaches
-	the same numbers through rdev->pm.current_sclk, which it maintains from
-	this table. */
-static uint32
-radeon_gpu_engine_clock_current()
-{
-	GET_ENGINE_CLOCK_PS_ALLOCATION args;
-	args.ulReturnEngineClock = 0;
-
-	int index = GetIndexIntoMasterTable(COMMAND, GetEngineClock);
-	if (atom_execute_table(gAtomContext, index, (uint32*)&args) != B_OK) {
-		TRACE("%s: GetEngineClock command table failed\n", __func__);
-		return 0;
-	}
-
-	// Returned in 10 kHz units.
-	return B_LENDIAN_TO_HOST_INT32(args.ulReturnEngineClock) * 10;
-}
-
-
-/*!	Current memory clock in kHz via the AtomBIOS GetMemoryClock command
-	table, or 0 if unavailable. See radeon_gpu_engine_clock_current() for
-	why the FirmwareInfo default is not good enough. */
-static uint32
-radeon_gpu_memory_clock_current()
-{
-	GET_MEMORY_CLOCK_PS_ALLOCATION args;
-	args.ulReturnMemoryClock = 0;
-
-	int index = GetIndexIntoMasterTable(COMMAND, GetMemoryClock);
-	if (atom_execute_table(gAtomContext, index, (uint32*)&args) != B_OK) {
-		TRACE("%s: GetMemoryClock command table failed\n", __func__);
-		return 0;
-	}
-
-	return B_LENDIAN_TO_HOST_INT32(args.ulReturnMemoryClock) * 10;
-}
-
-
 status_t
 radeon_gpu_probe()
 {
@@ -148,8 +101,8 @@ radeon_gpu_probe()
 	uint32 defaultMemoryClock = B_LENDIAN_TO_HOST_INT32(
 		firmwareInfo->info.ulDefaultMemoryClock) * 10;
 
-	uint32 currentEngineClock = radeon_gpu_engine_clock_current();
-	uint32 currentMemoryClock = radeon_gpu_memory_clock_current();
+	uint32 currentEngineClock = powerplay_engine_clock_current();
+	uint32 currentMemoryClock = powerplay_memory_clock_current();
 
 	gInfo->engineClockFrequency = currentEngineClock != 0
 		? currentEngineClock : defaultEngineClock;
@@ -170,9 +123,25 @@ radeon_gpu_probe()
 		gInfo->engineClockFrequency, gInfo->memoryClockFrequency,
 		gInfo->displayClockFrequency);
 
-	// What could this board reach if it were managed? Read-only; corroborates
-	// the clocks above against the table's own lowest level.
+	// What could this board reach if it were managed? All read-only; see
+	// docs/power-management-investigation.md. The control-table revisions and
+	// the target selection are Phase A probes: they report what a future
+	// write path would do without doing any of it.
 	powerplay_dump_performance_levels();
+	powerplay_dump_control_tables();
+	powerplay_dump_target_selection();
+
+	// Investigation Phases B and C: raise the engine clock where the board's
+	// own table sanctions it at the voltage already applied, then optionally
+	// VDDCI and the memory clock. Both tiers are gated off by default and
+	// have separate switches — see powerplay.h. Engine first so that a board
+	// where the data-return path binds the bandwidth actually benefits from
+	// the memory raise.
+	if (powerplay_apply_target() == B_OK) {
+		TRACE("%s: clocks after raise: engine %" B_PRIu32 " kHz, memory %"
+			B_PRIu32 " kHz\n", __func__, gInfo->engineClockFrequency,
+			gInfo->memoryClockFrequency);
+	}
 
 	return B_OK;
 }

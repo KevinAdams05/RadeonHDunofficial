@@ -30,6 +30,7 @@
 #include "encoder.h"
 #include "hdmi.h"
 #include "pll.h"
+#include "powerplay.h"
 #include "utility.h"
 
 
@@ -485,12 +486,26 @@ is_mode_supported(display_mode* mode)
 		capChipName = "Barts";
 	}
 	if (capKHz != 0 && mode->timing.pixel_clock > capKHz) {
-		TRACE("%s: rejecting %" B_PRIu32 "x%" B_PRIu32 " on %s "
-			"(pixel clock %" B_PRIu32 " kHz exceeds %" B_PRIu32
-			" MHz linear-scanout cap)\n", __func__,
-			mode->virtual_width, mode->virtual_height, capChipName,
-			mode->timing.pixel_clock, capKHz / 1000);
-		sane = false;
+		// The caps are empirical, and re-deriving them needs over-cap modes
+		// to be reachable. `ignore_pixel_clock_cap` in the driver settings
+		// makes them advisory for that purpose only: it is off by default,
+		// it is not a supported configuration, and the expected outcome of
+		// enabling it is the stride-aliased corruption the caps exist to
+		// avoid. See docs/power-management-investigation.md.
+		if (powerplay_pixel_clock_cap_ignored()) {
+			ERROR("%s: ALLOWING %" B_PRIu32 "x%" B_PRIu32 " on %s at %"
+				B_PRIu32 " kHz, over the %" B_PRIu32 " MHz cap - "
+				"'ignore_pixel_clock_cap' is set. Corruption is expected.\n",
+				__func__, mode->virtual_width, mode->virtual_height,
+				capChipName, mode->timing.pixel_clock, capKHz / 1000);
+		} else {
+			TRACE("%s: rejecting %" B_PRIu32 "x%" B_PRIu32 " on %s "
+				"(pixel clock %" B_PRIu32 " kHz exceeds %" B_PRIu32
+				" MHz linear-scanout cap)\n", __func__,
+				mode->virtual_width, mode->virtual_height, capChipName,
+				mode->timing.pixel_clock, capKHz / 1000);
+			sane = false;
+		}
 	}
 
 	// if we have edid info, check frequency adginst crt reported valid ranges
