@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 860" width="1080" height="860" font-family="DejaVu Sans, Helvetica, Arial, sans-serif">
+  <title>GPU soft reset: RadeonHD (unofficial) versus the reworked Linux GFX7 sequence</title>
+  <desc>Side-by-side comparison of radeon_gpu_reset() in the RadeonHD accelerant and gfx_v7_0_soft_reset() as reworked for Linux 7.3, plus the GRBM_SOFT_RESET bit-layout divergence between TeraScale and CIK that makes the RadeonHD mask invalid on GFX7 hardware.</desc>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3a3a42"/>
+    </marker>
+    <marker id="aRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#b3261e"/>
+    </marker>
+  </defs>
+
+  <style>
+    .ttl   { font-size: 16px; font-weight: 700; fill: #16161a; }
+    .colhd { font-size: 13.5px; font-weight: 700; fill: #16161a; }
+    .sub   { font-size: 11px; fill: #6a6a74; }
+    .col   { fill: #f5f5f7; stroke: #cfcfd6; stroke-width: 1; rx: 8; }
+    .step  { fill: #ffffff; stroke: #4a4a52; stroke-width: 1.3; rx: 5; }
+    .stepw { fill: #fdeeee; stroke: #b3261e; stroke-width: 1.5; rx: 5; }
+    .stepg { fill: #eef7ee; stroke: #2a7a2a; stroke-width: 1.5; rx: 5; }
+    .stepb { fill: #eef4fd; stroke: #1a5fb4; stroke-width: 1.5; rx: 5; }
+    .t     { font-size: 12px; fill: #1a1a1a; }
+    .tb    { font-size: 12px; font-weight: 600; fill: #1a1a1a; }
+    .tm    { font-size: 11px; fill: #4a4a54; font-family: "DejaVu Sans Mono", monospace; }
+    .ln    { stroke: #3a3a42; stroke-width: 1.5; fill: none; marker-end: url(#a); }
+    .note  { font-size: 11px; fill: #8a2f28; }
+    .bitok { fill: #eef7ee; stroke: #2a7a2a; stroke-width: 1; }
+    .bitno { fill: #fdeeee; stroke: #b3261e; stroke-width: 1; }
+    .bitmi { fill: #fff6e0; stroke: #d08c00; stroke-width: 1; }
+    .bitna { fill: #eeeef1; stroke: #9a9aa4; stroke-width: 1; }
+    .bitlbl{ font-size: 10px; fill: #2a2a32; font-family: "DejaVu Sans Mono", monospace; }
+    .legt  { font-size: 11px; fill: #3a3a42; }
+  </style>
+
+  <text class="ttl" x="540" y="26" text-anchor="middle">GPU soft reset — RadeonHD (unofficial) vs reworked Linux GFX7 (7.3)</text>
+  <text class="sub" x="540" y="44" text-anchor="middle">Linux referenced for register semantics and sequencing only. No code copied.</text>
+
+  <!-- ── columns ─────────────────────────────────────────── -->
+  <rect class="col" x="20"  y="58" width="500" height="452"/>
+  <rect class="col" x="560" y="58" width="500" height="452"/>
+
+  <text class="colhd" x="40"  y="80">RadeonHD — <tspan class="tm">radeon_gpu_reset()</tspan></text>
+  <text class="sub"   x="40"  y="97">gpu.cpp:156 · never called · TeraScale masks only</text>
+
+  <text class="colhd" x="580" y="80">Linux 7.3 — <tspan class="tm">gfx_v7_0_soft_reset()</tspan></text>
+  <text class="sub"   x="580" y="97">resets the GFX IP block only · VRAM preserved</text>
+
+  <!-- ── left column steps ───────────────────────────────── -->
+  <rect class="stepw" x="40" y="110" width="460" height="42"/>
+  <text class="tb" x="54" y="128">gate: return B_ERROR unless GUI_ACTIVE</text>
+  <text class="note" x="54" y="144">refuses to reset an idle GPU — backwards for unwedging</text>
+
+  <rect class="step" x="40" y="164" width="460" height="38"/>
+  <text class="tb" x="54" y="182">halt memory controller, wait for idle</text>
+  <text class="tm" x="54" y="197">evergreen_gpu_mc_halt() / radeon_gpu_mc_halt()</text>
+
+  <rect class="step" x="40" y="214" width="460" height="34"/>
+  <text class="tb" x="54" y="235">halt CP parsing / prefetch</text>
+
+  <rect class="stepw" x="40" y="260" width="220" height="80"/>
+  <text class="tb" x="54" y="278">pre-Cedar branch</text>
+  <text class="t"  x="54" y="296">build grbmBusyMask from</text>
+  <text class="t"  x="54" y="311">GRBM_STATUS, reset only</text>
+  <text class="t"  x="54" y="326">blocks that look busy</text>
+
+  <rect class="stepb" x="280" y="260" width="220" height="80"/>
+  <text class="tb" x="294" y="278">Evergreen+ branch</text>
+  <text class="t"  x="294" y="296">fixed mask, unconditional</text>
+  <text class="t"  x="294" y="311">— already matches the</text>
+  <text class="t"  x="294" y="326">philosophy Linux adopted</text>
+
+  <rect class="stepw" x="40" y="352" width="460" height="56"/>
+  <text class="tb" x="54" y="370">write GRBM_SOFT_RESET, delay, write 0</text>
+  <text class="note" x="54" y="386">one path for Evergreen → Vega, gated only on</text>
+  <text class="note" x="54" y="401">chipsetID &gt;= RADEON_CEDAR — see bit table below</text>
+
+  <rect class="step" x="40" y="420" width="460" height="34"/>
+  <text class="tb" x="54" y="441">resume memory controller</text>
+
+  <rect class="stepw" x="40" y="466" width="460" height="34"/>
+  <text class="tb" x="54" y="487">no RLC · no SRBM · no CG/PG · no GMCON_DEBUG stall</text>
+
+  <!-- ── right column steps ──────────────────────────────── -->
+  <rect class="stepg" x="580" y="110" width="460" height="42"/>
+  <text class="tb" x="594" y="128">no status gate at all</text>
+  <text class="t"  x="594" y="145">reset unconditionally, then re-initialise</text>
+
+  <rect class="step" x="580" y="164" width="460" height="38"/>
+  <text class="tb" x="594" y="182">deactivate each compute HQD</text>
+  <text class="tm" x="594" y="197">srbm_select per ring · udelay(50)  [no analogue here]</text>
+
+  <rect class="stepb" x="580" y="214" width="460" height="56"/>
+  <text class="tb" x="594" y="232">ungate clock + power gating, then suspend</text>
+  <text class="tm" x="594" y="248">CG_STATE_UNGATE, PG_STATE_UNGATE</text>
+  <text class="t"  x="594" y="264">so functionality is not degraded after reset</text>
+
+  <rect class="step" x="580" y="282" width="460" height="42"/>
+  <text class="tb" x="594" y="300">GMCON_DEBUG: GFX_STALL + GFX_CLEAR</text>
+  <text class="tm" x="594" y="316">udelay(100)  — stall-then-clear before the reset</text>
+
+  <rect class="stepg" x="580" y="336" width="460" height="72"/>
+  <text class="tb" x="594" y="354">fixed full-block mask — no guessing</text>
+  <text class="tm" x="594" y="371">GRBM: RLC | GFX | CP | CPF | CPC | CPG</text>
+  <text class="tm" x="594" y="387">SRBM: GRBM | SEM</text>
+  <text class="t"  x="594" y="403">&#8220;instead of taking a guess at which parts need reset&#8221;</text>
+
+  <rect class="step" x="580" y="420" width="460" height="34"/>
+  <text class="tb" x="594" y="441">re-gate CG/PG, restart RLC, re-init rings</text>
+
+  <rect class="stepg" x="580" y="466" width="460" height="34"/>
+  <text class="tb" x="594" y="487">VRAM contents preserved — session survives a hang</text>
+
+  <path class="ln" d="M 524 284 L 556 284"/>
+
+  <!-- ── bit layout comparison ───────────────────────────── -->
+  <text class="ttl" x="540" y="552" text-anchor="middle" font-size="14">GRBM_SOFT_RESET (0x8020) — same register, different bits per generation</text>
+  <text class="sub" x="540" y="570" text-anchor="middle">verified against Linux evergreend.h:828 and cikd.h:1075</text>
+
+  <text class="colhd" x="40" y="600">TeraScale / Evergreen — what our mask writes</text>
+  <text class="colhd" x="40" y="702">CIK / GFX7 (Bonaire, Hawaii) — what those bits actually mean</text>
+
+  <!-- Evergreen row: bits 0..19 -->
+  <g>
+    <!-- bit cells, 20 bits, 48px wide each starting x=40 -->
+    <rect class="bitok" x="40"  y="612" width="48" height="30"/><text class="bitlbl" x="46" y="631">0 CP</text>
+    <rect class="bitok" x="88"  y="612" width="48" height="30"/><text class="bitlbl" x="94" y="631">1 CB</text>
+    <rect class="bitna" x="136" y="612" width="48" height="30"/><text class="bitlbl" x="146" y="631">2 –</text>
+    <rect class="bitok" x="184" y="612" width="48" height="30"/><text class="bitlbl" x="190" y="631">3 DB</text>
+    <rect class="bitok" x="232" y="612" width="48" height="30"/><text class="bitlbl" x="236" y="631">4 GDS</text>
+    <rect class="bitok" x="280" y="612" width="48" height="30"/><text class="bitlbl" x="286" y="631">5 PA</text>
+    <rect class="bitok" x="328" y="612" width="48" height="30"/><text class="bitlbl" x="334" y="631">6 SC</text>
+    <rect class="bitok" x="376" y="612" width="48" height="30"/><text class="bitlbl" x="382" y="631">8 SPI</text>
+    <rect class="bitok" x="424" y="612" width="48" height="30"/><text class="bitlbl" x="430" y="631">9 SH</text>
+    <rect class="bitok" x="472" y="612" width="48" height="30"/><text class="bitlbl" x="478" y="631">10 SX</text>
+    <rect class="bitok" x="520" y="612" width="48" height="30"/><text class="bitlbl" x="526" y="631">11 TC</text>
+    <rect class="bitok" x="568" y="612" width="48" height="30"/><text class="bitlbl" x="574" y="631">12 TA</text>
+    <rect class="bitok" x="616" y="612" width="48" height="30"/><text class="bitlbl" x="622" y="631">14 VGT</text>
+    <rect class="bitok" x="664" y="612" width="48" height="30"/><text class="bitlbl" x="670" y="631">15 IA</text>
+    <rect class="bitna" x="712" y="612" width="60" height="30"/><text class="bitlbl" x="718" y="631">16 –</text>
+    <rect class="bitna" x="772" y="612" width="60" height="30"/><text class="bitlbl" x="778" y="631">17 –</text>
+    <rect class="bitna" x="832" y="612" width="60" height="30"/><text class="bitlbl" x="838" y="631">18 –</text>
+    <rect class="bitna" x="892" y="612" width="60" height="30"/><text class="bitlbl" x="898" y="631">19 –</text>
+  </g>
+  <text class="legt" x="40" y="662">Our Evergreen+ mask sets bits 0,1,3,4,5,6,8,9,10,11,12,14,15 — correct on TeraScale.</text>
+  <text class="note" x="40" y="680">The same mask is used for every chip with chipsetID &#8805; RADEON_CEDAR, including CIK.</text>
+
+  <!-- CIK row -->
+  <g>
+    <rect class="bitok" x="40"  y="714" width="48" height="30"/><text class="bitlbl" x="46" y="733">0 CP</text>
+    <rect class="bitno" x="88"  y="714" width="48" height="30"/><text class="bitlbl" x="98" y="733">1 rsvd</text>
+    <rect class="bitmi" x="136" y="714" width="48" height="30"/><text class="bitlbl" x="140" y="733">2 RLC</text>
+    <rect class="bitno" x="184" y="714" width="48" height="30"/><text class="bitlbl" x="194" y="733">3 rsvd</text>
+    <rect class="bitno" x="232" y="714" width="48" height="30"/><text class="bitlbl" x="242" y="733">4 rsvd</text>
+    <rect class="bitno" x="280" y="714" width="48" height="30"/><text class="bitlbl" x="290" y="733">5 rsvd</text>
+    <rect class="bitno" x="328" y="714" width="48" height="30"/><text class="bitlbl" x="338" y="733">6 rsvd</text>
+    <rect class="bitno" x="376" y="714" width="48" height="30"/><text class="bitlbl" x="386" y="733">8 rsvd</text>
+    <rect class="bitno" x="424" y="714" width="48" height="30"/><text class="bitlbl" x="434" y="733">9 rsvd</text>
+    <rect class="bitno" x="472" y="714" width="48" height="30"/><text class="bitlbl" x="482" y="733">10 rsv</text>
+    <rect class="bitno" x="520" y="714" width="48" height="30"/><text class="bitlbl" x="530" y="733">11 rsv</text>
+    <rect class="bitno" x="568" y="714" width="48" height="30"/><text class="bitlbl" x="578" y="733">12 rsv</text>
+    <rect class="bitno" x="616" y="714" width="48" height="30"/><text class="bitlbl" x="626" y="733">14 rsv</text>
+    <rect class="bitno" x="664" y="714" width="48" height="30"/><text class="bitlbl" x="674" y="733">15 rsv</text>
+    <rect class="bitmi" x="712" y="714" width="60" height="30"/><text class="bitlbl" x="718" y="733">16 GFX</text>
+    <rect class="bitmi" x="772" y="714" width="60" height="30"/><text class="bitlbl" x="778" y="733">17 CPF</text>
+    <rect class="bitmi" x="832" y="714" width="60" height="30"/><text class="bitlbl" x="838" y="733">18 CPC</text>
+    <rect class="bitmi" x="892" y="714" width="60" height="30"/><text class="bitlbl" x="898" y="733">19 CPG</text>
+  </g>
+
+  <text class="note" x="40" y="766">On CIK only bit 0 lines up. Bits 1–15 are reserved, and RLC / GFX / CPF / CPC / CPG — the ones that matter — are never set.</text>
+  <text class="legt" x="40" y="784">No user impact today: the function has no callers. It is a latent trap for whoever wires it up.</text>
+
+  <!-- legend -->
+  <rect class="col" x="20" y="800" width="1040" height="46"/>
+  <rect class="bitok" x="40"  y="812" width="16" height="16"/><text class="legt" x="64"  y="825">valid on this generation</text>
+  <rect class="bitmi" x="240" y="812" width="16" height="16"/><text class="legt" x="264" y="825">defined here, never set by our mask</text>
+  <rect class="bitno" x="520" y="812" width="16" height="16"/><text class="legt" x="544" y="825">reserved — our mask writes it anyway</text>
+  <rect class="bitna" x="812" y="812" width="16" height="16"/><text class="legt" x="836" y="825">not defined on this generation</text>
+</svg>
