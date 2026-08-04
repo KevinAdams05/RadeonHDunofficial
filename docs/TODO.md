@@ -250,3 +250,16 @@ inconsistent. Sweep all 106 together when items 9 and 10 are addressed.
   commented out (XXX). The root cause is Haiku ticket #19348 (the AtomBIOS
   parser writing into nominally-RO memory), a kernel/shared-parser issue
   rather than a driver-local fix.
+
+- **2D and 3D acceleration.** Both are blocked outside the driver, not inside
+  it. For 2D, `app_server` **deliberately removed** its consumer of the 2D hooks
+  in November 2024 (commit `03f77fd7d9`, reviewed by Axel Dörfler and
+  waddlesplash) — measured slower than the CPU, broke double buffering, and is
+  fundamentally incompatible with antialiased drawing because alpha blending
+  needs destination read-back and VRAM reads are far too slow. Most accelerants
+  (matrox, neomagic, nvidia, radeon, via) still implement the hooks; they are
+  all dead paths now. For 3D, Haiku has no DRM equivalent at all: no GPU memory
+  manager, no command submission, no fences, so Mesa has nothing to target
+  (its Haiku build is llvmpipe/lavapipe, CPU only). Full write-up, including
+  the donor-code inventory and the licence asymmetry that makes the kernel
+  half the expensive part: [`acceleration-feasibility.md`](acceleration-feasibility.md).
