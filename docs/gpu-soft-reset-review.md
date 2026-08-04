@@ -1,6 +1,9 @@
 # GPU soft reset — review against the Linux GFX7 rework
 
-**Status:** review only. No code changed. Tracked as TODO item 15.
+**Status:** reviewed, then acted on. `radeon_gpu_reset()` and its `SOFT_RESET_*`
+defines were deleted (option 1 of §7); TODO item 15 is closed. Sections 3–5
+describe the code as it stood before removal, and are kept because they record
+*why* it went.
 **Trigger:** Timur Kristóf's *"drm/amdgpu/gfx7: Use GFX IP block soft reset on
 GFX7"* series (v2, 2026-07-21, landing in Linux 7.3), plus the GFX6 follow-up of
 2026-08-03. Covered by Phoronix as
