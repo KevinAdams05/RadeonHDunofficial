@@ -420,7 +420,9 @@ functions that:
 Two callers were updated to use the Evergreen-specific path when
 `chipsetID >= RADEON_CEDAR`:
 
-- `radeon_gpu_reset()` — full GPU reset path.
+- `radeon_gpu_reset()` — full GPU reset path. Note this function currently has
+  no callers, and its `GRBM_SOFT_RESET` masks are only valid on TeraScale — see
+  [`gpu-soft-reset-review.md`](gpu-soft-reset-review.md) and TODO item 15.
 - `radeon_gpu_mc_setup_evergreen()` — MC base address reconfiguration path.
 
 Saved/restored CRTC state lives in a new `evergreen_gpu_state` struct
