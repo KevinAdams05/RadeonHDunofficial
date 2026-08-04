@@ -417,13 +417,14 @@ functions that:
 - Use VBlank-synchronized blanking via `CRTC_DISP_READ_REQUEST_DISABLE`.
 - Wait for the surface-update-pending bit to clear before re-enabling CRTCs.
 
-Two callers were updated to use the Evergreen-specific path when
+Two callers were updated at the time to use the Evergreen-specific path when
 `chipsetID >= RADEON_CEDAR`:
 
-- `radeon_gpu_reset()` — full GPU reset path. Note this function currently has
-  no callers, and its `GRBM_SOFT_RESET` masks are only valid on TeraScale — see
-  [`gpu-soft-reset-review.md`](gpu-soft-reset-review.md) and TODO item 15.
 - `radeon_gpu_mc_setup_evergreen()` — MC base address reconfiguration path.
+- `radeon_gpu_reset()` — full GPU reset path. **Since removed**: it never had a
+  call site, and its `GRBM_SOFT_RESET` masks were only valid on TeraScale
+  despite the function covering every chip from Cedar onward. See
+  [`gpu-soft-reset-review.md`](gpu-soft-reset-review.md).
 
 Saved/restored CRTC state lives in a new `evergreen_gpu_state` struct
 declared in `accelerant.h`, sized to hold per-CRTC control words and surface

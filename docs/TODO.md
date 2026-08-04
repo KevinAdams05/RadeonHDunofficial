@@ -268,22 +268,22 @@ those encoder types need to be supported.
   beyond the two already committed
   (`scanout-watermark-arbitration.svg`, `powerplay-level-targets.svg`).
 
-### 15. `radeon_gpu_reset()` is dead code with TeraScale-only register masks
-`src/.../accelerants/radeon_hd/gpu.cpp:156`, declared at `gpu.h:173`. The
-function has **no call site** anywhere in the tree; upstream Haiku's only
-caller is commented out (`bios.cpp:176`, `// radeon_gpu_reset(); // <= r500
-only?`). Its "Evergreen and higher" branch is gated only on
-`chipsetID >= RADEON_CEDAR`, so one path covers Evergreen through Vega — but
-`GRBM_SOFT_RESET` (0x8020) has an almost entirely different bit layout on
-CIK: only bit 0 (`CP`) matches, bits 1–15 are reserved there, and
-`RLC`/`GFX`/`CPF`/`CPC`/`CPG` are never set. On Bonaire the mask would poke a
-dozen reserved bits and reset nothing it intends to. No user impact today
-(nothing calls it), but a latent trap for whoever wires it up. Prefer
-deleting the function plus the `SOFT_RESET_*` defines at `gpu.h:153-168` and
-the unused `SRBM_SOFT_RESET` at `gpu.h:152`, alongside items 9 and 10; then
-drop the "full GPU reset path" claim at `technical-documentation.md:423`.
-Full analysis, including what the Linux 7.3 GFX7 rework does and does not
-imply for a display-only driver: `docs/gpu-soft-reset-review.md`.
+### 15. ~~`radeon_gpu_reset()` is dead code with TeraScale-only masks~~ — DONE
+Removed: the function had **no call site** anywhere in the tree, and its
+`GRBM_SOFT_RESET` masks were TeraScale-only while the function covered every
+chip from Cedar onward. On CIK only bit 0 (`CP`) matched; bits 1–15 are
+reserved there and `RLC`/`GFX`/`CPF`/`CPC`/`CPG` were never set. Deleted the
+function, its declaration, the `SOFT_RESET_*` defines and the unused
+`SRBM_SOFT_RESET`. `GRBM_SOFT_RESET` itself was **kept** — the unreachable
+tail of `radeon_gpu_ring_boot()` still references it (item 10). Analysis:
+`docs/gpu-soft-reset-review.md`.
+
+**Residue for the item 9/10 sweep:** removing the function orphaned 35 more
+register defines in `gpu.h` — `GRBM_STATUS`, `GRBM_STATUS2`, `GUI_ACTIVE`,
+`CP_ME_HALT`, `CP_PFP_HALT` and the `*_BUSY` bit vocabulary. They were left in
+place deliberately: `gpu.h` already carried 71 unreferenced defines from the
+ring/CP scaffolding, so deleting only these 35 would leave the header
+inconsistent. Sweep all 106 together when items 9 and 10 are addressed.
 
 ---
 
